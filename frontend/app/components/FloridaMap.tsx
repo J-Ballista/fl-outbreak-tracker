@@ -12,12 +12,13 @@ import Legend from "./Legend";
 // ---------------------------------------------------------------------------
 
 interface CountyFeatureProps {
-  GEOID: string;       // 5-digit FIPS
   NAME: string;        // county name
   [key: string]: unknown;
 }
 
-type CountyFeature = Feature<Geometry, CountyFeatureProps>;
+// The Plotly GeoJSON stores the 5-digit FIPS as a top-level `id` field,
+// not inside `properties`.
+type CountyFeature = Feature<Geometry, CountyFeatureProps> & { id: string };
 
 interface TooltipState {
   x: number;
@@ -67,12 +68,13 @@ export default function FloridaMap({ casesByFips }: FloridaMapProps) {
       .then((r) => r.json())
       .then((raw: FeatureCollection) => {
         if (cancelled) return;
-        // Filter to Florida counties only (FIPS starts with "12")
+        // Filter to Florida counties only (FIPS starts with "12").
+        // The Plotly GeoJSON stores the 5-digit FIPS in the top-level `id` field.
         const fl: FeatureCollection = {
           ...raw,
           features: raw.features.filter((f) => {
-            const props = f.properties as CountyFeatureProps;
-            return props?.GEOID?.startsWith("12");
+            const fips = (f as CountyFeature).id;
+            return fips?.startsWith("12");
           }),
         };
         setGeojson(fl);
@@ -110,12 +112,12 @@ export default function FloridaMap({ casesByFips }: FloridaMapProps) {
     // Draw / update county paths
     svg
       .selectAll<SVGPathElement, CountyFeature>("path.county")
-      .data(geojson.features as CountyFeature[], (d) => d.properties.GEOID)
+      .data(geojson.features as CountyFeature[], (d) => d.id)
       .join("path")
       .attr("class", "county")
       .attr("d", (d) => path(d) ?? "")
       .attr("fill", (d) => {
-        const count = casesByFips.get(d.properties.GEOID);
+        const count = casesByFips.get(d.id);
         return count !== undefined ? colorScale(count) : "#e2e8f0";
       })
       .attr("stroke", "#94a3b8")
@@ -127,7 +129,7 @@ export default function FloridaMap({ casesByFips }: FloridaMapProps) {
           x: mx,
           y: my,
           county: `${d.properties.NAME} County`,
-          cases: casesByFips.get(d.properties.GEOID) ?? null,
+          cases: casesByFips.get(d.id) ?? null,
         });
       })
       .on("mouseleave", () => setTooltip(null));

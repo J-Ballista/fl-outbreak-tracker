@@ -51,10 +51,20 @@ def upgrade() -> None:
 
     # ------------------------------------------------------------------
     # disease_cases  (becomes a TimescaleDB hypertable)
+    # TimescaleDB requires the partitioning column (report_date) to be
+    # part of every unique index, including the primary key.
+    # We use a composite PK (id, report_date) to satisfy this constraint
+    # while keeping id as the logical row identifier.
     # ------------------------------------------------------------------
+    op.execute("CREATE SEQUENCE disease_cases_id_seq")
     op.create_table(
         "disease_cases",
-        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
+        sa.Column(
+            "id",
+            sa.Integer(),
+            server_default=sa.text("nextval('disease_cases_id_seq')"),
+            nullable=False,
+        ),
         sa.Column("report_date", sa.Date(), nullable=False),
         sa.Column(
             "county_fips",
@@ -80,6 +90,7 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.text("now()"),
         ),
+        sa.PrimaryKeyConstraint("id", "report_date", name="pk_disease_cases"),
     )
     op.create_index("ix_disease_cases_county_fips", "disease_cases", ["county_fips"])
     op.create_index("ix_disease_cases_disease_id", "disease_cases", ["disease_id"])
@@ -227,5 +238,6 @@ def downgrade() -> None:
     op.drop_table("vaccination_rates")
     # TimescaleDB hypertable — execute raw DROP to avoid ORM confusion
     op.execute("DROP TABLE IF EXISTS disease_cases CASCADE;")
+    op.execute("DROP SEQUENCE IF EXISTS disease_cases_id_seq;")
     op.drop_table("diseases")
     op.drop_table("counties")
