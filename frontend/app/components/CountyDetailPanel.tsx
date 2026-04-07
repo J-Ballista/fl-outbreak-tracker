@@ -25,6 +25,7 @@ interface CountyDetailPanelProps {
   trend: TrendPoint[];
   ageBreakdown: AgeBreakdownRow[];
   acquisitionBreakdown: AcquisitionBreakdownRow[];
+  selectedDiseaseId?: number;
   onClose: () => void;
 }
 
@@ -72,6 +73,7 @@ export default function CountyDetailPanel({
   trend,
   ageBreakdown,
   acquisitionBreakdown,
+  selectedDiseaseId,
   onClose,
 }: CountyDetailPanelProps) {
   const open = county !== null;
@@ -85,6 +87,26 @@ export default function CountyDetailPanel({
     (sum, r) => sum + r.total_cases,
     0
   );
+
+  // Compute vacc stats for the trend sparkline
+  const trendVaccPct: number | null = (() => {
+    if (selectedDiseaseId !== undefined) {
+      return vaccByDisease.find((r) => r.disease_id === selectedDiseaseId)?.vaccinated_pct ?? null;
+    }
+    return vaccSummary?.vaccinated_pct ?? null;
+  })();
+
+  const trendHerdThreshold: number | null = (() => {
+    if (selectedDiseaseId !== undefined) {
+      return diseases.find((d) => d.id === selectedDiseaseId)?.herd_threshold_pct ?? null;
+    }
+    // Composite average of all diseases that have a threshold
+    const thresholds = diseases
+      .map((d) => d.herd_threshold_pct)
+      .filter((t): t is number => t != null);
+    if (thresholds.length === 0) return null;
+    return thresholds.reduce((a, b) => a + b, 0) / thresholds.length;
+  })();
 
   return (
     <>
@@ -187,7 +209,13 @@ export default function CountyDetailPanel({
                 Case Trend
               </h3>
               <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200">
-                <TrendSparkline data={trend} width={292} height={56} />
+                <TrendSparkline
+                  data={trend}
+                  vaccPct={trendVaccPct}
+                  herdThreshold={trendHerdThreshold}
+                  width={292}
+                  height={160}
+                />
               </div>
             </section>
           )}

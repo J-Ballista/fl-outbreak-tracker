@@ -396,6 +396,7 @@ export default function DashboardPage() {
         trend={caseTrend}
         ageBreakdown={ageBreakdown}
         acquisitionBreakdown={acquisitionBreakdown}
+        selectedDiseaseId={selectedDiseaseId}
         onClose={() => setSelectedCounty(null)}
       />
     </div>
