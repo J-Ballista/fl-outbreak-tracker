@@ -152,15 +152,33 @@ export default function TrendSparkline({
 
     // ── Bottom X axis ─────────────────────────────────────────────────────────
 
+    // Build X tick values: auto ticks + always include the last data point,
+    // dropping any auto tick that falls within 20px of the last date.
+    const lastDate = parsed[parsed.length - 1].date;
+    const lastPx   = xScale(lastDate);
+    const autoTicks = xScale.ticks(Math.min(parsed.length, 5));
+    const filteredTicks = autoTicks.filter(
+      (t) => Math.abs(xScale(t) - lastPx) > 20
+    );
+    const tickValues = [...filteredTicks, lastDate];
+
     g.append("g")
       .attr("transform", `translate(0,${h})`)
       .call(
         d3.axisBottom(xScale)
-          .ticks(Math.min(parsed.length, 5))
-          .tickFormat(d3.timeFormat("%b %y") as (v: Date | d3.NumberValue) => string)
+          .tickValues(tickValues)
+          .tickFormat(d3.timeFormat("%b '%y") as (v: Date | d3.NumberValue) => string)
       )
       .call((ag) => ag.select(".domain").attr("stroke", "#cbd5e1"))
-      .call((ag) => ag.selectAll(".tick text").attr("fill", "#475569").attr("font-size", 11))
+      .call((ag) => {
+        // Bold + red the last tick so it stands out
+        ag.selectAll(".tick text")
+          .attr("fill", "#475569")
+          .attr("font-size", 11);
+        ag.selectAll(".tick:last-child text")
+          .attr("fill", "#ef4444")
+          .attr("font-weight", "700");
+      })
       .call((ag) => ag.selectAll(".tick line").attr("stroke", "#cbd5e1"));
 
     // ── Case area + line (red) ────────────────────────────────────────────────
@@ -198,7 +216,7 @@ export default function TrendSparkline({
       [labelHerdY, labelVaccY] = separateLabels(rawHerdY, rawVaccY);
     }
 
-    // Draw herd threshold
+    // Draw herd threshold — label on LEFT side
     if (herdThreshold != null && rawHerdY != null) {
       g.append("line")
         .attr("x1", 0).attr("x2", w)
@@ -207,22 +225,14 @@ export default function TrendSparkline({
         .attr("stroke-width", 2)
         .attr("stroke-dasharray", "6,4");
 
-      // Small tick connecting line to label when nudged
-      if (labelHerdY !== rawHerdY) {
-        g.append("line")
-          .attr("x1", 8).attr("x2", 8)
-          .attr("y1", rawHerdY).attr("y2", labelHerdY!)
-          .attr("stroke", "#d97706").attr("stroke-width", 1).attr("opacity", 0.4);
-      }
-
       g.append("text")
-        .attr("x", 4).attr("y", labelHerdY! - 4)
+        .attr("x", 4).attr("y", (labelHerdY ?? rawHerdY) - 4)
         .attr("fill", "#d97706")
-        .attr("font-size", 10).attr("font-weight", "700")
+        .attr("font-size", 12).attr("font-weight", "700")
         .text(`Herd ${fmt(herdThreshold)}%`);
     }
 
-    // Draw vaccination rate
+    // Draw vaccination rate — label on RIGHT side (text-anchor end)
     if (vaccPct != null && rawVaccY != null) {
       g.append("line")
         .attr("x1", 0).attr("x2", w)
@@ -230,17 +240,11 @@ export default function TrendSparkline({
         .attr("stroke", "#15803d")
         .attr("stroke-width", 2.5);
 
-      if (labelVaccY !== rawVaccY) {
-        g.append("line")
-          .attr("x1", 8).attr("x2", 8)
-          .attr("y1", rawVaccY).attr("y2", labelVaccY!)
-          .attr("stroke", "#15803d").attr("stroke-width", 1).attr("opacity", 0.4);
-      }
-
       g.append("text")
-        .attr("x", 4).attr("y", labelVaccY! - 4)
+        .attr("x", w - 4).attr("y", (labelVaccY ?? rawVaccY) - 4)
+        .attr("text-anchor", "end")
         .attr("fill", "#15803d")
-        .attr("font-size", 10).attr("font-weight", "700")
+        .attr("font-size", 12).attr("font-weight", "700")
         .text(`Vacc ${fmt(vaccPct)}%`);
     }
 
