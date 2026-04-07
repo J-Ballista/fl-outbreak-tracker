@@ -11,8 +11,12 @@ import {
   useVaccinationSummary,
   useCountyVaccRates,
   useNewsSignals,
+  useAlerts,
+  useCaseTrend,
+  useAgeBreakdown,
+  useAcquisitionBreakdown,
 } from "@/app/hooks/useMapData";
-import type { LayerMode } from "@/app/components/FloridaMap";
+import type { LayerMode, AlertSeverity } from "@/app/components/FloridaMap";
 
 // FloridaMap uses D3 DOM APIs — load client-side only
 const FloridaMap = dynamic(() => import("@/app/components/FloridaMap"), {
@@ -34,7 +38,10 @@ export default function DashboardPage() {
   const [layerMode, setLayerMode] = useState<LayerMode>("cases");
 
   // ── Selected county for detail panel ──
-  const [selectedCounty, setSelectedCounty] = useState<{ fips: string; name: string } | null>(null);
+  const [selectedCounty, setSelectedCounty] = useState<{
+    fips: string;
+    name: string;
+  } | null>(null);
 
   // ── Data fetching ──
   const { data: counties = [] } = useCounties();
@@ -52,6 +59,29 @@ export default function DashboardPage() {
     county_fips: selectedCounty?.fips,
     disease_id: selectedDiseaseId,
   });
+  const { data: allAlerts = [] } = useAlerts({ active_only: true });
+  const { data: countyAlerts = [] } = useAlerts({
+    county_fips: selectedCounty?.fips,
+    active_only: true,
+  });
+  const { data: caseTrend = [] } = useCaseTrend(selectedCounty?.fips, {
+    disease_id: selectedDiseaseId,
+    date_from: dateFrom || undefined,
+    date_to: dateTo || undefined,
+  });
+  const { data: ageBreakdown = [] } = useAgeBreakdown(selectedCounty?.fips, {
+    disease_id: selectedDiseaseId,
+    date_from: dateFrom || undefined,
+    date_to: dateTo || undefined,
+  });
+  const { data: acquisitionBreakdown = [] } = useAcquisitionBreakdown(
+    selectedCounty?.fips,
+    {
+      disease_id: selectedDiseaseId,
+      date_from: dateFrom || undefined,
+      date_to: dateTo || undefined,
+    }
+  );
 
   // ── Derived maps ──
   const casesByFips = useMemo<Map<string, number>>(
@@ -63,6 +93,26 @@ export default function DashboardPage() {
     () => new Map(vaccRows.map((r) => [r.county_fips, r.vaccinated_pct])),
     [vaccRows]
   );
+
+  // Highest-severity alert per county for map overlay
+  const alertsByFips = useMemo<Map<string, AlertSeverity>>(() => {
+    const severityOrder: Record<AlertSeverity, number> = {
+      watch: 1,
+      warning: 2,
+      emergency: 3,
+    };
+    const map = new Map<string, AlertSeverity>();
+    for (const alert of allAlerts) {
+      const existing = map.get(alert.county_fips);
+      if (
+        !existing ||
+        severityOrder[alert.severity] > severityOrder[existing]
+      ) {
+        map.set(alert.county_fips, alert.severity);
+      }
+    }
+    return map;
+  }, [allAlerts]);
 
   // ── Summary stats ──
   const totalCases = useMemo(
@@ -83,9 +133,7 @@ export default function DashboardPage() {
   );
 
   function handleCountyClick(fips: string, name: string) {
-    setSelectedCounty((prev) =>
-      prev?.fips === fips ? null : { fips, name }
-    );
+    setSelectedCounty((prev) => (prev?.fips === fips ? null : { fips, name }));
   }
 
   return (
@@ -101,7 +149,7 @@ export default function DashboardPage() {
               Vaccine-preventable disease surveillance · 67 counties
             </p>
           </div>
-          <div className="flex gap-6 text-right">
+          <div className="flex items-center gap-6 text-right">
             <div>
               <p className="text-2xl font-bold text-white">
                 {totalCases.toLocaleString()}
@@ -112,6 +160,15 @@ export default function DashboardPage() {
               <p className="text-2xl font-bold text-white">{countiesWithCases}</p>
               <p className="text-xs text-blue-300">counties affected</p>
             </div>
+            {/* Alert badge */}
+            {allAlerts.length > 0 && (
+              <div className="flex items-center gap-1.5 rounded-full bg-red-600 px-3 py-1.5 shadow-sm">
+                <span className="text-sm font-bold text-white">
+                  ⚠ {allAlerts.length}
+                </span>
+                <span className="text-xs text-red-200">active alerts</span>
+              </div>
+            )}
           </div>
         </div>
       </header>
@@ -140,13 +197,15 @@ export default function DashboardPage() {
             </span>
             {dateFrom && (
               <>
-                {" "}from{" "}
+                {" "}
+                from{" "}
                 <span className="font-medium text-slate-700">{dateFrom}</span>
               </>
             )}
             {dateTo && (
               <>
-                {" "}to{" "}
+                {" "}
+                to{" "}
                 <span className="font-medium text-slate-700">{dateTo}</span>
               </>
             )}
@@ -155,7 +214,6 @@ export default function DashboardPage() {
 
         {/* Layer toggle + map */}
         <div className="mt-4">
-          {/* Toggle */}
           <div className="mb-2 flex items-center gap-2">
             {(["cases", "vaccination"] as LayerMode[]).map((mode) => (
               <button
@@ -187,6 +245,7 @@ export default function DashboardPage() {
             <FloridaMap
               casesByFips={casesByFips}
               vaccinationByFips={vaccinationByFips}
+              alertsByFips={alertsByFips}
               layerMode={layerMode}
               onCountyClick={handleCountyClick}
             />
@@ -220,6 +279,9 @@ export default function DashboardPage() {
                   <th className="px-4 py-3 text-right font-medium text-slate-600">
                     Vacc %
                   </th>
+                  <th className="px-4 py-3 text-right font-medium text-slate-600">
+                    Alert
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -233,16 +295,27 @@ export default function DashboardPage() {
                     );
                     const per100k =
                       county?.population && county.population > 0
-                        ? ((row.total_cases / county.population) * 100_000).toFixed(1)
+                        ? (
+                            (row.total_cases / county.population) *
+                            100_000
+                          ).toFixed(1)
                         : "—";
                     const vacc = vaccRows.find(
                       (v) => v.county_fips === row.county_fips
                     );
+                    const alertSeverity = alertsByFips.get(row.county_fips);
+                    const alertColors: Record<string, string> = {
+                      emergency: "bg-red-100 text-red-700",
+                      warning: "bg-orange-100 text-orange-700",
+                      watch: "bg-amber-100 text-amber-700",
+                    };
                     return (
                       <tr
                         key={row.county_fips}
                         className={`cursor-pointer hover:bg-slate-50 ${
-                          selectedCounty?.fips === row.county_fips ? "bg-blue-50" : ""
+                          selectedCounty?.fips === row.county_fips
+                            ? "bg-blue-50"
+                            : ""
                         }`}
                         onClick={() =>
                           handleCountyClick(
@@ -273,13 +346,24 @@ export default function DashboardPage() {
                         <td className="px-4 py-2 text-right text-slate-500">
                           {vacc ? `${vacc.vaccinated_pct.toFixed(1)}%` : "—"}
                         </td>
+                        <td className="px-4 py-2 text-right">
+                          {alertSeverity ? (
+                            <span
+                              className={`rounded-full px-2 py-0.5 text-xs font-semibold capitalize ${alertColors[alertSeverity]}`}
+                            >
+                              {alertSeverity}
+                            </span>
+                          ) : (
+                            <span className="text-slate-300">—</span>
+                          )}
+                        </td>
                       </tr>
                     );
                   })}
                 {summaryRows.length === 0 && !summaryLoading && (
                   <tr>
                     <td
-                      colSpan={6}
+                      colSpan={7}
                       className="px-4 py-6 text-center text-slate-400"
                     >
                       No case data for the selected filters.
@@ -308,6 +392,10 @@ export default function DashboardPage() {
         vaccByDisease={countyVaccRates}
         signals={newsSignals}
         diseases={diseases}
+        alerts={countyAlerts}
+        trend={caseTrend}
+        ageBreakdown={ageBreakdown}
+        acquisitionBreakdown={acquisitionBreakdown}
         onClose={() => setSelectedCounty(null)}
       />
     </div>

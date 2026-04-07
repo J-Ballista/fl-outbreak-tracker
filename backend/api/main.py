@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.api.routers import cases, counties, diseases, vaccination_rates, news
+from backend.api.routers import cases, counties, diseases, vaccination_rates, news, alerts
 
 app = FastAPI(
     title="FL Outbreak Tracker API",
@@ -21,6 +21,7 @@ app.include_router(diseases.router)
 app.include_router(cases.router)
 app.include_router(vaccination_rates.router)
 app.include_router(news.router)
+app.include_router(alerts.router)
 
 
 @app.get("/")

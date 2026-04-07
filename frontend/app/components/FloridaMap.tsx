@@ -12,7 +12,7 @@ import Legend from "./Legend";
 // ---------------------------------------------------------------------------
 
 interface CountyFeatureProps {
-  NAME: string;        // county name
+  NAME: string;
   [key: string]: unknown;
 }
 
@@ -28,10 +28,12 @@ interface TooltipState {
 }
 
 export type LayerMode = "cases" | "vaccination";
+export type AlertSeverity = "watch" | "warning" | "emergency";
 
 interface FloridaMapProps {
   casesByFips: Map<string, number>;
   vaccinationByFips: Map<string, number>;
+  alertsByFips: Map<string, AlertSeverity>;
   layerMode: LayerMode;
   onCountyClick: (fips: string, name: string) => void;
 }
@@ -46,6 +48,12 @@ const FL_GEOJSON_URL =
 const WIDTH = 800;
 const HEIGHT = 540;
 
+const ALERT_COLORS: Record<AlertSeverity, string> = {
+  watch: "#f59e0b",
+  warning: "#f97316",
+  emergency: "#ef4444",
+};
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -53,6 +61,7 @@ const HEIGHT = 540;
 export default function FloridaMap({
   casesByFips,
   vaccinationByFips,
+  alertsByFips,
   layerMode,
   onCountyClick,
 }: FloridaMapProps) {
@@ -83,7 +92,9 @@ export default function FloridaMap({
         setGeojson(fl);
       })
       .catch(console.error);
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // ------------------------------------------------------------------
@@ -115,12 +126,12 @@ export default function FloridaMap({
     const activeMap = layerMode === "vaccination" ? vaccinationByFips : casesByFips;
 
     const svg = d3.select(svgRef.current);
-    const projection = d3.geoAlbersUsa().fitSize(
-      [WIDTH, HEIGHT],
-      geojson as GeoPermissibleObjects
-    );
+    const projection = d3
+      .geoAlbersUsa()
+      .fitSize([WIDTH, HEIGHT], geojson as GeoPermissibleObjects);
     const path = d3.geoPath().projection(projection);
 
+    // County fill paths
     svg
       .selectAll<SVGPathElement, CountyFeature>("path.county")
       .data(geojson.features as CountyFeature[], (d) => d.id)
@@ -147,7 +158,46 @@ export default function FloridaMap({
       .on("click", (_event: MouseEvent, d: CountyFeature) => {
         onCountyClick(d.id, d.properties.NAME);
       });
-  }, [geojson, casesByFips, vaccinationByFips, layerMode, colorScale, onCountyClick]);
+
+    // Alert ring overlays — drawn on top of county fills
+    const alertFeatures = (geojson.features as CountyFeature[]).filter(
+      (f) => alertsByFips.has(f.id)
+    );
+
+    svg
+      .selectAll<SVGPathElement, CountyFeature>("path.alert-ring")
+      .data(alertFeatures, (d) => d.id)
+      .join("path")
+      .attr("class", "alert-ring")
+      .attr("d", (d) => path(d) ?? "")
+      .attr("fill", "none")
+      .attr("stroke", (d) => ALERT_COLORS[alertsByFips.get(d.id)!])
+      .attr("stroke-width", 2.5)
+      .style("pointer-events", "none");
+
+    // Pulsing dot for emergency counties
+    const emergencyFeatures = (geojson.features as CountyFeature[]).filter(
+      (f) => alertsByFips.get(f.id) === "emergency"
+    );
+
+    svg
+      .selectAll<SVGCircleElement, CountyFeature>("circle.alert-dot")
+      .data(emergencyFeatures, (d) => d.id)
+      .join("circle")
+      .attr("class", "alert-dot")
+      .attr("cx", (d) => {
+        const centroid = path.centroid(d);
+        return centroid[0] ?? 0;
+      })
+      .attr("cy", (d) => {
+        const centroid = path.centroid(d);
+        return centroid[1] ?? 0;
+      })
+      .attr("r", 5)
+      .attr("fill", ALERT_COLORS.emergency)
+      .attr("opacity", 0.85)
+      .style("pointer-events", "none");
+  }, [geojson, casesByFips, vaccinationByFips, alertsByFips, layerMode, colorScale, onCountyClick]);
 
   const legendLabel = layerMode === "vaccination" ? "Vaccination %" : "Cases";
 
@@ -171,6 +221,21 @@ export default function FloridaMap({
       <div className="mt-2 flex justify-end">
         <Legend colorScale={colorScale} domain={domain} label={legendLabel} />
       </div>
+      {/* Alert legend */}
+      {alertsByFips.size > 0 && (
+        <div className="absolute bottom-10 left-3 flex flex-col gap-1 rounded-lg bg-white/90 px-3 py-2 shadow-md ring-1 ring-slate-200 text-xs">
+          <span className="font-semibold text-slate-600 mb-1">Alerts</span>
+          {(["emergency", "warning", "watch"] as AlertSeverity[]).map((sev) => (
+            <div key={sev} className="flex items-center gap-1.5">
+              <span
+                className="inline-block h-3 w-3 rounded-full border-2"
+                style={{ borderColor: ALERT_COLORS[sev] }}
+              />
+              <span className="capitalize text-slate-600">{sev}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

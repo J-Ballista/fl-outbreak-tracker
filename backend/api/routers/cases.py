@@ -39,6 +39,21 @@ class CaseSummary(BaseModel):
     probable_total: int
 
 
+class TrendPoint(BaseModel):
+    report_date: date
+    total_cases: int
+
+
+class AgeBreakdownRow(BaseModel):
+    age_group: str
+    total_cases: int
+
+
+class AcquisitionBreakdownRow(BaseModel):
+    acquisition: str
+    total_cases: int
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -109,5 +124,101 @@ async def cases_summary(
             confirmed_total=int(row.confirmed_total),
             probable_total=int(row.probable_total),
         )
+        for row in result.all()
+    ]
+
+
+@router.get("/trend/{fips_code}", response_model=list[TrendPoint])
+async def case_trend(
+    fips_code: str,
+    disease_id: int | None = Query(None),
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+) -> list[TrendPoint]:
+    """Time-series case totals for a single county, ordered by date."""
+    q = (
+        select(
+            DiseaseCase.report_date,
+            func.sum(DiseaseCase.case_count).label("total_cases"),
+        )
+        .where(DiseaseCase.county_fips == fips_code)
+        .group_by(DiseaseCase.report_date)
+        .order_by(DiseaseCase.report_date)
+    )
+    if disease_id is not None:
+        q = q.where(DiseaseCase.disease_id == disease_id)
+    if date_from:
+        q = q.where(DiseaseCase.report_date >= date_from)
+    if date_to:
+        q = q.where(DiseaseCase.report_date <= date_to)
+
+    result = await db.execute(q)
+    return [
+        TrendPoint(report_date=row.report_date, total_cases=int(row.total_cases))
+        for row in result.all()
+    ]
+
+
+@router.get("/age-breakdown/{fips_code}", response_model=list[AgeBreakdownRow])
+async def age_breakdown(
+    fips_code: str,
+    disease_id: int | None = Query(None),
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+) -> list[AgeBreakdownRow]:
+    """Case counts grouped by age_group for a single county."""
+    q = (
+        select(
+            func.coalesce(DiseaseCase.age_group, "Unknown").label("age_group"),
+            func.sum(DiseaseCase.case_count).label("total_cases"),
+        )
+        .where(DiseaseCase.county_fips == fips_code)
+        .group_by(func.coalesce(DiseaseCase.age_group, "Unknown"))
+        .order_by(func.sum(DiseaseCase.case_count).desc())
+    )
+    if disease_id is not None:
+        q = q.where(DiseaseCase.disease_id == disease_id)
+    if date_from:
+        q = q.where(DiseaseCase.report_date >= date_from)
+    if date_to:
+        q = q.where(DiseaseCase.report_date <= date_to)
+
+    result = await db.execute(q)
+    return [
+        AgeBreakdownRow(age_group=row.age_group, total_cases=int(row.total_cases))
+        for row in result.all()
+    ]
+
+
+@router.get("/acquisition-breakdown/{fips_code}", response_model=list[AcquisitionBreakdownRow])
+async def acquisition_breakdown(
+    fips_code: str,
+    disease_id: int | None = Query(None),
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+) -> list[AcquisitionBreakdownRow]:
+    """Case counts grouped by acquisition type for a single county."""
+    q = (
+        select(
+            func.coalesce(DiseaseCase.acquisition, "Unknown").label("acquisition"),
+            func.sum(DiseaseCase.case_count).label("total_cases"),
+        )
+        .where(DiseaseCase.county_fips == fips_code)
+        .group_by(func.coalesce(DiseaseCase.acquisition, "Unknown"))
+        .order_by(func.sum(DiseaseCase.case_count).desc())
+    )
+    if disease_id is not None:
+        q = q.where(DiseaseCase.disease_id == disease_id)
+    if date_from:
+        q = q.where(DiseaseCase.report_date >= date_from)
+    if date_to:
+        q = q.where(DiseaseCase.report_date <= date_to)
+
+    result = await db.execute(q)
+    return [
+        AcquisitionBreakdownRow(acquisition=row.acquisition, total_cases=int(row.total_cases))
         for row in result.all()
     ]

@@ -8,6 +8,10 @@ import {
   fetchVaccinationSummary,
   fetchCountyVaccRates,
   fetchNewsSignals,
+  fetchAlerts,
+  fetchCaseTrend,
+  fetchAgeBreakdown,
+  fetchAcquisitionBreakdown,
 } from "@/app/lib/api";
 
 export function useCounties() {
@@ -60,6 +64,52 @@ export function useNewsSignals(params: {
     ? ["news-signals", params.county_fips, params.disease_id, params.limit]
     : null;
   return useSWR(key, () => fetchNewsSignals(params), {
+    revalidateOnFocus: false,
+  });
+}
+
+export function useAlerts(params: {
+  county_fips?: string;
+  disease_id?: number;
+  severity?: string;
+  active_only?: boolean;
+}) {
+  const key = ["alerts", params.county_fips, params.disease_id, params.severity, params.active_only];
+  return useSWR(key, () => fetchAlerts(params), { revalidateOnFocus: false });
+}
+
+export function useCaseTrend(
+  fips_code: string | null | undefined,
+  params: { disease_id?: number; date_from?: string; date_to?: string }
+) {
+  const key = fips_code
+    ? ["case-trend", fips_code, params.disease_id, params.date_from, params.date_to]
+    : null;
+  return useSWR(key, () => fetchCaseTrend(fips_code!, params), {
+    revalidateOnFocus: false,
+  });
+}
+
+export function useAgeBreakdown(
+  fips_code: string | null | undefined,
+  params: { disease_id?: number; date_from?: string; date_to?: string }
+) {
+  const key = fips_code
+    ? ["age-breakdown", fips_code, params.disease_id, params.date_from, params.date_to]
+    : null;
+  return useSWR(key, () => fetchAgeBreakdown(fips_code!, params), {
+    revalidateOnFocus: false,
+  });
+}
+
+export function useAcquisitionBreakdown(
+  fips_code: string | null | undefined,
+  params: { disease_id?: number; date_from?: string; date_to?: string }
+) {
+  const key = fips_code
+    ? ["acq-breakdown", fips_code, params.disease_id, params.date_from, params.date_to]
+    : null;
+  return useSWR(key, () => fetchAcquisitionBreakdown(fips_code!, params), {
     revalidateOnFocus: false,
   });
 }

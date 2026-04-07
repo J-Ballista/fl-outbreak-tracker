@@ -56,6 +56,34 @@ export interface NewsSignal {
   article_published_at: string | null;
 }
 
+export interface Alert {
+  id: number;
+  county_fips: string;
+  disease_id: number;
+  alert_date: string;
+  severity: "watch" | "warning" | "emergency";
+  metric: string;
+  threshold_value: number | null;
+  observed_value: number | null;
+  resolved_at: string | null;
+  created_at: string;
+}
+
+export interface TrendPoint {
+  report_date: string;
+  total_cases: number;
+}
+
+export interface AgeBreakdownRow {
+  age_group: string;
+  total_cases: number;
+}
+
+export interface AcquisitionBreakdownRow {
+  acquisition: string;
+  total_cases: number;
+}
+
 // ---------------------------------------------------------------------------
 // Fetch helpers
 // ---------------------------------------------------------------------------
@@ -118,4 +146,62 @@ export function fetchNewsSignals(params: {
   if (params.limit !== undefined) qs.set("limit", String(params.limit));
   const query = qs.toString() ? `?${qs}` : "";
   return get<NewsSignal[]>(`/news/signals${query}`);
+}
+
+export function fetchAlerts(params: {
+  county_fips?: string;
+  disease_id?: number;
+  severity?: string;
+  active_only?: boolean;
+}): Promise<Alert[]> {
+  const qs = new URLSearchParams();
+  if (params.county_fips) qs.set("county_fips", params.county_fips);
+  if (params.disease_id !== undefined)
+    qs.set("disease_id", String(params.disease_id));
+  if (params.severity) qs.set("severity", params.severity);
+  if (params.active_only !== undefined)
+    qs.set("active_only", String(params.active_only));
+  const query = qs.toString() ? `?${qs}` : "";
+  return get<Alert[]>(`/alerts/${query}`);
+}
+
+export function fetchCaseTrend(
+  fips_code: string,
+  params: { disease_id?: number; date_from?: string; date_to?: string }
+): Promise<TrendPoint[]> {
+  const qs = new URLSearchParams();
+  if (params.disease_id !== undefined)
+    qs.set("disease_id", String(params.disease_id));
+  if (params.date_from) qs.set("date_from", params.date_from);
+  if (params.date_to) qs.set("date_to", params.date_to);
+  const query = qs.toString() ? `?${qs}` : "";
+  return get<TrendPoint[]>(`/cases/trend/${fips_code}${query}`);
+}
+
+export function fetchAgeBreakdown(
+  fips_code: string,
+  params: { disease_id?: number; date_from?: string; date_to?: string }
+): Promise<AgeBreakdownRow[]> {
+  const qs = new URLSearchParams();
+  if (params.disease_id !== undefined)
+    qs.set("disease_id", String(params.disease_id));
+  if (params.date_from) qs.set("date_from", params.date_from);
+  if (params.date_to) qs.set("date_to", params.date_to);
+  const query = qs.toString() ? `?${qs}` : "";
+  return get<AgeBreakdownRow[]>(`/cases/age-breakdown/${fips_code}${query}`);
+}
+
+export function fetchAcquisitionBreakdown(
+  fips_code: string,
+  params: { disease_id?: number; date_from?: string; date_to?: string }
+): Promise<AcquisitionBreakdownRow[]> {
+  const qs = new URLSearchParams();
+  if (params.disease_id !== undefined)
+    qs.set("disease_id", String(params.disease_id));
+  if (params.date_from) qs.set("date_from", params.date_from);
+  if (params.date_to) qs.set("date_to", params.date_to);
+  const query = qs.toString() ? `?${qs}` : "";
+  return get<AcquisitionBreakdownRow[]>(
+    `/cases/acquisition-breakdown/${fips_code}${query}`
+  );
 }

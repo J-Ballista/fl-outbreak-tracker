@@ -7,25 +7,53 @@ import type {
   CountyDiseaseVaccRate,
   NewsSignal,
   Disease,
+  Alert,
+  TrendPoint,
+  AgeBreakdownRow,
+  AcquisitionBreakdownRow,
 } from "@/app/lib/api";
+import TrendSparkline from "./TrendSparkline";
 
 interface CountyDetailPanelProps {
   county: County | null;
   cases: CaseSummary | null;
-  vaccSummary: VaccinationSummary | null;       // overall avg for the county (for map toggle)
-  vaccByDisease: CountyDiseaseVaccRate[];        // per-disease breakdown
+  vaccSummary: VaccinationSummary | null;
+  vaccByDisease: CountyDiseaseVaccRate[];
   signals: NewsSignal[];
   diseases: Disease[];
+  alerts: Alert[];
+  trend: TrendPoint[];
+  ageBreakdown: AgeBreakdownRow[];
+  acquisitionBreakdown: AcquisitionBreakdownRow[];
   onClose: () => void;
+}
+
+const SEVERITY_STYLES = {
+  emergency: "bg-red-100 text-red-700 ring-1 ring-red-300",
+  warning: "bg-orange-100 text-orange-700 ring-1 ring-orange-300",
+  watch: "bg-amber-100 text-amber-700 ring-1 ring-amber-300",
+};
+
+function SeverityBadge({ severity }: { severity: string }) {
+  const style =
+    SEVERITY_STYLES[severity as keyof typeof SEVERITY_STYLES] ??
+    "bg-slate-100 text-slate-600";
+  return (
+    <span className={`rounded-full px-2 py-0.5 text-xs font-semibold uppercase ${style}`}>
+      {severity}
+    </span>
+  );
 }
 
 function ConfidenceBadge({ value }: { value: number | null }) {
   if (value === null) return null;
   const pct = Math.round((value ?? 0) * 100);
   const color =
-    pct >= 85 ? "bg-green-100 text-green-700" :
-    pct >= 65 ? "bg-yellow-100 text-yellow-700" :
-                "bg-slate-100 text-slate-500";
+    pct >= 85
+      ? "bg-green-100 text-green-700"
+      : pct >= 65
+      ? "bg-yellow-100 text-yellow-700"
+      : "bg-slate-100 text-slate-500";
   return (
     <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${color}`}>
       {pct}% conf
@@ -40,6 +68,10 @@ export default function CountyDetailPanel({
   vaccByDisease,
   signals,
   diseases,
+  alerts,
+  trend,
+  ageBreakdown,
+  acquisitionBreakdown,
   onClose,
 }: CountyDetailPanelProps) {
   const open = county !== null;
@@ -48,6 +80,11 @@ export default function CountyDetailPanel({
     if (id === null) return "Unknown";
     return diseases.find((d) => d.id === id)?.name ?? `Disease ${id}`;
   }
+
+  const totalAcquisition = acquisitionBreakdown.reduce(
+    (sum, r) => sum + r.total_cases,
+    0
+  );
 
   return (
     <>
@@ -80,6 +117,45 @@ export default function CountyDetailPanel({
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6">
+          {/* ── Active Alerts ── */}
+          {alerts.length > 0 && (
+            <section>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                Active Alerts
+                <span className="ml-2 rounded-full bg-red-100 px-2 py-0.5 text-red-700 text-xs font-semibold">
+                  {alerts.length}
+                </span>
+              </h3>
+              <ul className="space-y-2">
+                {alerts.map((alert) => (
+                  <li
+                    key={alert.id}
+                    className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200 flex flex-col gap-1"
+                  >
+                    <div className="flex items-center gap-2">
+                      <SeverityBadge severity={alert.severity} />
+                      <span className="text-xs font-medium text-slate-700">
+                        {diseaseName(alert.disease_id)}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500">
+                      {alert.metric === "case_spike"
+                        ? `Case spike: ${alert.observed_value} cases (threshold ${alert.threshold_value?.toFixed(1)})`
+                        : `Vacc rate ${alert.observed_value?.toFixed(1)}% < ${alert.threshold_value?.toFixed(0)}% herd threshold`}
+                    </p>
+                    <p className="text-xs text-slate-400">
+                      {new Date(alert.alert_date).toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric",
+                      })}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
           {/* ── Cases KPIs ── */}
           <section>
             <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
@@ -87,9 +163,9 @@ export default function CountyDetailPanel({
             </h3>
             <div className="grid grid-cols-3 gap-2">
               {[
-                { label: "Total",     value: cases?.total_cases     ?? 0 },
+                { label: "Total", value: cases?.total_cases ?? 0 },
                 { label: "Confirmed", value: cases?.confirmed_total ?? 0 },
-                { label: "Probable",  value: cases?.probable_total  ?? 0 },
+                { label: "Probable", value: cases?.probable_total ?? 0 },
               ].map(({ label, value }) => (
                 <div
                   key={label}
@@ -104,6 +180,80 @@ export default function CountyDetailPanel({
             </div>
           </section>
 
+          {/* ── Trend Sparkline ── */}
+          {trend.length > 0 && (
+            <section>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                Case Trend
+              </h3>
+              <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200">
+                <TrendSparkline data={trend} width={292} height={56} />
+              </div>
+            </section>
+          )}
+
+          {/* ── Age Breakdown ── */}
+          {ageBreakdown.length > 0 && (
+            <section>
+              <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                Age Breakdown
+              </h3>
+              <div className="space-y-2">
+                {ageBreakdown.map((row) => {
+                  const maxCases = Math.max(...ageBreakdown.map((r) => r.total_cases));
+                  const pct = maxCases > 0 ? (row.total_cases / maxCases) * 100 : 0;
+                  return (
+                    <div key={row.age_group} className="flex items-center gap-2">
+                      <span className="w-16 shrink-0 text-right text-xs text-slate-500">
+                        {row.age_group}
+                      </span>
+                      <div className="flex-1 h-4 rounded-full bg-slate-100 overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-blue-400 transition-all"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      <span className="w-10 shrink-0 text-xs font-medium text-slate-700">
+                        {row.total_cases.toLocaleString()}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
+          {/* ── Acquisition Type ── */}
+          {acquisitionBreakdown.length > 0 && (
+            <section>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                Acquisition
+              </h3>
+              <div className="flex flex-wrap gap-2">
+                {acquisitionBreakdown.map((row) => {
+                  const pct =
+                    totalAcquisition > 0
+                      ? Math.round((row.total_cases / totalAcquisition) * 100)
+                      : 0;
+                  return (
+                    <span
+                      key={row.acquisition}
+                      className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 ring-1 ring-slate-200"
+                    >
+                      {row.acquisition}{" "}
+                      <span className="font-bold text-slate-800">
+                        {pct}%
+                      </span>
+                      <span className="ml-1 text-slate-500">
+                        ({row.total_cases.toLocaleString()})
+                      </span>
+                    </span>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
           {/* ── Vaccination Rate ── */}
           {vaccSummary !== null && (
             <section>
@@ -114,7 +264,6 @@ export default function CountyDetailPanel({
                 </span>
               </h3>
 
-              {/* Overall bar */}
               <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200 mb-3">
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-sm font-medium text-slate-700">
@@ -134,7 +283,6 @@ export default function CountyDetailPanel({
                 )}
               </div>
 
-              {/* Per-disease table */}
               {vaccByDisease.length > 0 && (
                 <div className="overflow-hidden rounded-lg ring-1 ring-slate-200">
                   <table className="min-w-full text-xs">
@@ -196,11 +344,10 @@ export default function CountyDetailPanel({
               <ul className="space-y-3">
                 {signals.map((sig) => {
                   const pubDate = sig.article_published_at
-                    ? new Date(sig.article_published_at).toLocaleDateString("en-US", {
-                        month: "short",
-                        day: "numeric",
-                        year: "numeric",
-                      })
+                    ? new Date(sig.article_published_at).toLocaleDateString(
+                        "en-US",
+                        { month: "short", day: "numeric", year: "numeric" }
+                      )
                     : null;
 
                   return (
@@ -223,7 +370,9 @@ export default function CountyDetailPanel({
                           </span>
                         )}
                         {pubDate && (
-                          <span className="text-xs text-slate-400">· {pubDate}</span>
+                          <span className="text-xs text-slate-400">
+                            · {pubDate}
+                          </span>
                         )}
                         <span className="text-xs text-slate-400">
                           · {diseaseName(sig.disease_id)}
