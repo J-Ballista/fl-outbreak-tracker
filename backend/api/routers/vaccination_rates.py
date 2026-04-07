@@ -28,6 +28,11 @@ class CountyDiseaseVaccRate(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class VaccTrendPoint(BaseModel):
+    survey_year: int
+    vaccinated_pct: float
+
+
 @router.get("/summary", response_model=list[VaccinationSummary])
 async def vaccination_summary(
     disease_id: int | None = Query(None, description="Filter by disease ID"),
@@ -70,6 +75,38 @@ async def vaccination_summary(
             exempt_medical_pct=round(float(row.exempt_medical_pct), 2) if row.exempt_medical_pct else None,
             exempt_religious_pct=round(float(row.exempt_religious_pct), 2) if row.exempt_religious_pct else None,
             survey_year=survey_year,
+        )
+        for row in result.all()
+    ]
+
+
+@router.get("/county/{fips_code}/trend", response_model=list[VaccTrendPoint])
+async def county_vacc_trend(
+    fips_code: str,
+    disease_id: int | None = Query(None, description="Filter by disease ID"),
+    db: AsyncSession = Depends(get_db),
+) -> list[VaccTrendPoint]:
+    """
+    Return year-over-year average vaccination rate for a county.
+    Averaged across all diseases unless disease_id is specified.
+    """
+    q = (
+        select(
+            VaccinationRate.survey_year,
+            func.avg(VaccinationRate.vaccinated_pct).label("vaccinated_pct"),
+        )
+        .where(VaccinationRate.county_fips == fips_code)
+        .group_by(VaccinationRate.survey_year)
+        .order_by(VaccinationRate.survey_year)
+    )
+    if disease_id is not None:
+        q = q.where(VaccinationRate.disease_id == disease_id)
+
+    result = await db.execute(q)
+    return [
+        VaccTrendPoint(
+            survey_year=row.survey_year,
+            vaccinated_pct=round(float(row.vaccinated_pct), 2),
         )
         for row in result.all()
     ]

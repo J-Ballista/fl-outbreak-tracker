@@ -43,6 +43,11 @@ export interface CountyDiseaseVaccRate {
   survey_year: number;
 }
 
+export interface VaccTrendPoint {
+  survey_year: number;
+  vaccinated_pct: number;
+}
+
 export interface NewsSignal {
   id: number;
   county_fips: string | null;
@@ -137,6 +142,11 @@ export function fetchVaccinationSummary(params: {
 export function fetchCountyVaccRates(fips_code: string, survey_year?: number): Promise<CountyDiseaseVaccRate[]> {
   const qs = survey_year !== undefined ? `?survey_year=${survey_year}` : "";
   return get<CountyDiseaseVaccRate[]>(`/vaccination-rates/county/${fips_code}${qs}`);
+}
+
+export function fetchCountyVaccTrend(fips_code: string, disease_id?: number): Promise<VaccTrendPoint[]> {
+  const qs = disease_id !== undefined ? `?disease_id=${disease_id}` : "";
+  return get<VaccTrendPoint[]>(`/vaccination-rates/county/${fips_code}/trend${qs}`);
 }
 
 export function fetchNewsSignals(params: {

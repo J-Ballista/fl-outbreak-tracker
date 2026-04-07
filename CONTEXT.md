@@ -37,11 +37,13 @@ A public health surveillance dashboard for Florida vaccine-preventable diseases 
 | Source | What it provides | Status |
 |---|---|---|
 | FL Health CHARTS (`flhealthcharts.gov`) | County-level annual VPD case counts | Scraper built; CHARTS URL has changed — needs endpoint update |
-| FL DOH School Immunization Survey | Annual vaccination/exemption rates by county and facility type | Seeded with synthetic data (realistic variance); real scraper TBD |
-| Local FL news RSS feeds | Free-text outbreak signals extracted via NLP | Scraper built (Orlando Sentinel, Miami Herald, Tampa Bay Times, etc.); seeded with 20 sample articles |
-| Seed data (synthetic) | Fills gaps while real scrapers are being fixed | 1,507 disease case rows, 2,412 vaccination rate rows, 20 article signals |
+| FL DOH School Immunization Survey | Annual vaccination/exemption rates by county and facility type | Seeded with synthetic data (3 years: 2022–2024, realistic Gaussian variance); real scraper TBD |
+| Local FL news RSS feeds | Free-text outbreak signals extracted via NLP | Scraper built (8 FL sources); seeded with 20 sample articles |
+| Seed data (synthetic) | Fills gaps while real scrapers are being fixed | 1,507 disease case rows, 2,412 vaccination rate rows, 10 outbreak alerts, 20 article signals |
 
 **Note on CHARTS scraper:** The report path `Chapt7.T7_2` now redirects to an AppError page — the FL CHARTS portal has changed its URL scheme. The scraper logic and CSV parsing are correct; only the endpoint URL needs updating once the new path is found on the CHARTS site.
+
+**Vaccination data note:** `vaccination_rates` stores one survey per year per county/disease (not monthly). The 3 seeded years (2022, 2023, 2024) are used for the YoY vaccination trend line in the county panel. YoY records are preserved intentionally for trend analytics.
 
 ---
 
@@ -52,9 +54,10 @@ County              67 FL counties, FIPS, population, centroid lat/lng
 Disease             12 vaccine-preventable diseases, ICD-10, herd threshold %, R₀
 DiseaseCase         Case counts per county/disease/date — TimescaleDB hypertable
 VaccinationRate     Annual survey results per county/disease/facility type
+                    (survey_year INTEGER — one row per year/county/disease)
 NewsArticle         Raw articles from RSS feeds (url, title, source, body_text)
 ArticleSignal       NLP-extracted signals: county, disease, case count, confidence
-OutbreakAlert       Threshold breach alerts (watch / warning / emergency) — future
+OutbreakAlert       Threshold breach alerts (watch / warning / emergency)
 ```
 
 **Important migration note:** `disease_cases` uses a composite PK `(id, report_date)` — required by TimescaleDB because the hypertable partitions on `report_date`, and all unique indexes must include the partition key.
@@ -64,20 +67,26 @@ OutbreakAlert       Threshold breach alerts (watch / warning / emergency) — fu
 ## API Endpoints
 
 ```
-GET /counties/                         All 67 counties
-GET /counties/{fips}                   Single county
-GET /diseases/                         All 12 tracked diseases
-GET /diseases/{id}                     Single disease
-GET /cases/                            Individual case records (filterable)
-GET /cases/summary                     Aggregated totals per county for choropleth
-                                         → returns total_cases, confirmed_total, probable_total
-GET /vaccination-rates/summary         Avg vaccination rate per county (for map layer)
-GET /vaccination-rates/county/{fips}   Per-disease vaccination rates for one county
-GET /news/signals                      Article signals joined with article metadata
-                                         → includes article_url (clickable source link)
+GET /counties/                              All 67 counties
+GET /counties/{fips}                        Single county
+GET /diseases/                              All 12 tracked diseases
+GET /diseases/{id}                          Single disease
+GET /cases/                                 Individual case records (filterable)
+GET /cases/summary                          Aggregated totals per county for choropleth
+                                              → returns total_cases, confirmed_total, probable_total
+GET /cases/trend/{fips}                     Monthly case time-series for one county
+GET /cases/age-breakdown/{fips}             Case counts by age group for one county
+GET /cases/acquisition-breakdown/{fips}     Case counts by acquisition type for one county
+GET /vaccination-rates/summary              Avg vaccination rate per county (for map layer)
+GET /vaccination-rates/county/{fips}        Per-disease vaccination rates (latest year)
+GET /vaccination-rates/county/{fips}/trend  YoY vaccination trend [{survey_year, vaccinated_pct}]
+GET /news/signals                           Article signals joined with article metadata
+GET /alerts/                                Active outbreak alerts (filterable by county/severity)
+POST /alerts/generate                       Scan cases+vacc data and create new alerts
 ```
 
 All case and vaccination endpoints accept `disease_id`, `date_from`, `date_to` query params.
+All routes require `Authorization: Bearer <API_KEY>` when `API_KEY` env var is set (disabled in dev).
 
 ---
 
@@ -86,16 +95,26 @@ All case and vaccination endpoints accept `disease_id`, `date_from`, `date_to` q
 ```
 app/
   page.tsx                  Main dashboard — state orchestration hub
+  login/page.tsx            Password gate page (blue-900 header, centered form)
+  api/login/route.ts        POST: validates password, sets httpOnly session cookie
+  middleware.ts             Redirects unauthenticated requests to /login
   components/
     FilterBar.tsx            Disease dropdown + MonthRangeSlider
     MonthRangeSlider.tsx     Dual-thumb slider over 24 rolling months
     FloridaMap.tsx           D3 SVG choropleth — Cases / Vaccination Rate toggle
-    CountyDetailPanel.tsx    Slide-out panel: KPIs, vacc rates, news article links
+                               + alert ring overlays (watch/warning/emergency)
+    CountyDetailPanel.tsx    Slide-out panel: Active Alerts, Cases KPIs, trend chart,
+                               age breakdown bars, acquisition pills, vacc table, news links
+    TrendSparkline.tsx       Dual-axis D3 chart: red case trend (left) + green vacc YoY
+                               trend (right) + amber herd threshold dotted line; hover
+                               tooltips on both lines; last month always pinned on X axis
     Tooltip.tsx              Hover tooltip (cases or vacc % depending on layer mode)
     Legend.tsx               Colour scale legend with dynamic label
   hooks/
     useMapData.ts            SWR hooks: useCounties, useDiseases, useCasesSummary,
-                               useVaccinationSummary, useCountyVaccRates, useNewsSignals
+                               useVaccinationSummary, useCountyVaccRates, useCountyVaccTrend,
+                               useNewsSignals, useAlerts, useCaseTrend,
+                               useAgeBreakdown, useAcquisitionBreakdown
   lib/
     api.ts                   Typed fetch functions + all TypeScript interfaces
 ```
@@ -108,41 +127,69 @@ app/
 The choropleth has two modes toggled by pill buttons above the map:
 - **Cases** — white→red sequential scale, domain = [0, max cases]
 - **Vaccination Rate** — white→green sequential scale, domain = [min%, max%]
+- Alert ring overlays drawn on top of fill: amber (watch), orange (warning), red pulsing dot (emergency)
 
 ### County detail panel
 Clicking any county (on map or in the table below) slides in a panel from the right with:
-1. **Cases box row** — Total / Confirmed / Probable for the current filter window
-2. **Vaccination rate bar** — Overall avg with progress bar; amber warning if < 90%; per-disease table with colour-coded %s (green ≥ 90, amber 85–90, red < 85)
-3. **News signals list** — Article titles as hyperlinks to source URLs, outlet name, publish date, extracted case count, NLP confidence badge
+1. **Active Alerts** — severity badges + metric description (shown only when alerts exist)
+2. **Cases box row** — Total / Confirmed / Probable for the current filter window
+3. **Case Trend chart** — Dual-axis D3 sparkline:
+   - Red line (left axis): monthly case counts with area fill
+   - Green line (right axis): vaccination rate YoY trend (survey_year → Jul 1 of that year)
+   - Amber dotted line: herd immunity threshold (static reference)
+   - Hover tooltip on both lines: date + case count + vacc % (if available)
+   - Last month always shown on X axis in red bold
+4. **Age Breakdown** — horizontal bars per age group
+5. **Acquisition type** — percentage pills (Community / Travel / Unknown)
+6. **Vaccination rate table** — Overall bar + per-disease sortable table
+7. **News signals** — Article titles as hyperlinks, outlet, date, NLP confidence
 
 ### Date filter
-A dual-thumb month range slider covers the most recent 24 months. Moving the sliders converts to `date_from` / `date_to` ISO strings that drive all API calls. "From" and "To" labels show the selected month/year.
+A dual-thumb month range slider covers the most recent 24 months. Moving the sliders converts to `date_from` / `date_to` ISO strings that drive all API calls.
 
 ### County table
-The table below the map now includes Confirmed, Probable, Per-100k, and Vaccination % columns. Clicking a table row opens the same county detail panel as clicking the map.
+The table below the map includes Confirmed, Probable, Per-100k, Vaccination %, and Alert severity columns. Clicking a row opens the same county detail panel.
 
 ---
+
+## Completed Items (v2 Plan)
+
+| Item | Status |
+|---|---|
+| Outbreak alerts backend (alert_engine, /alerts/ router) | ✅ Done |
+| Alert seed data (10 alerts across all severities) | ✅ Done |
+| Trend endpoint `/cases/trend/{fips}` | ✅ Done |
+| Age breakdown endpoint `/cases/age-breakdown/{fips}` | ✅ Done |
+| Acquisition breakdown endpoint `/cases/acquisition-breakdown/{fips}` | ✅ Done |
+| Vaccination YoY trend endpoint `/vaccination-rates/county/{fips}/trend` | ✅ Done |
+| Alert ring overlays on map (watch/warning/emergency) | ✅ Done |
+| County panel — Active Alerts section | ✅ Done |
+| County panel — TrendSparkline with dual axes + hover tooltips | ✅ Done |
+| County panel — Age breakdown bars | ✅ Done |
+| County panel — Acquisition type pills | ✅ Done |
+| Header alert count badge | ✅ Done |
+| Alert column in county table | ✅ Done |
+| Basic auth — API key middleware (backend) | ✅ Done |
+| Basic auth — Next.js password gate + login page | ✅ Done |
+| News scraper — 5 additional FL sources added | ✅ Done |
+| News scraper — disease ID cache loaded at startup | ✅ Done |
+| Docker cron service (cron_runner.py + Dockerfile.scraper) | ✅ Done |
+| requirements.txt for reproducible Docker builds | ✅ Done |
 
 ## Known Gaps / Future Ideas
 
 | Topic | Notes |
 |---|---|
 | CHARTS scraper fix | Find the updated report URL on `flhealthcharts.gov` and update `CHARTS_REPORT_PARAMS` in `backend/scrapers/fl_charts.py` |
-| Real vaccination data | Build a scraper for the actual FL DOH school immunization PDFs/exports to replace synthetic seed data |
-| News scraper live run | The `news_feed.py` scraper is functional — run it against live RSS feeds and confirm signals are stored correctly |
-| Outbreak alerts | `OutbreakAlert` model and router are stubbed but not surfaced in UI — could add a banner or badge on counties with active alerts |
-| Age group breakdown | `DiseaseCase.age_group` field exists; could add a bar chart in the county panel showing case distribution by age |
-| Acquisition type | `DiseaseCase.acquisition` (community / travel / unknown) is stored but not visualised |
-| Trend sparkline | A small time-series line per county in the panel would show whether cases are rising or falling |
-| Real-time alerts | Subscribe to FL DOH weekly VPD report emails and ingest them via a cron job |
-| Authentication | Currently no auth — add if the dashboard moves to a production environment with private data |
-| NLP upgrade | Swap the regex classifier in `backend/nlp/classifier.py` for a spaCy NER model for better entity extraction from news text |
-| Herd-immunity colour scale | Vaccination map layer should colour counties relative to each disease's herd immunity threshold — dark green = well above, light green = just above, light red = just below, dark red = significantly below. Use `disease.herd_threshold_pct` as the pivot point. |
-| News deduplication | When an article signals a disease, contextualise it against existing records by allegation target and date window to avoid double-counting the same outbreak across multiple articles. |
-| Expand news sources | Current seed articles used fake/removed URLs. Need a broader, more robust source strategy — e.g. Google News RSS for disease+state queries, CDC health advisory feeds, Florida Health News, and verified local outlets. Seed articles should be replaced with real crawled content. Reference search: `measles miami site:*.com` style queries surface many valid FL sources. |
-| Month slider UX | Replace the current two separate From/To sliders with a single range bar that has two draggable endpoints (standard range slider pattern). Visual should show the selected span highlighted between the two handles. |
-| County panel — YoY analytics | In the county detail panel, add year-over-year change for each disease: vaccination rate YoY Δ%, confirmed case count YoY Δ, and YoY % change. Compare most recent survey/report year vs. the prior year. |
-| Analytics / BI chart view | Add a second view accessible either from a tab above the map or from inside the county panel. Shows a time-series line/bar chart for vaccination rates and case counts across the 12 diseases. Dropdowns for disease, county, and metric. Include a horizontal dotted reference line per disease showing the herd immunity vaccination % threshold as a benchmark. |
+| Real vaccination data | Build `backend/scrapers/fl_doh_vacc.py` to pull real FL DOH school immunization exports; replace synthetic seed |
+| News scraper live run | Run `python -m backend.scrapers.news_feed` against live feeds; verify signals stored correctly |
+| NLP upgrade | Swap the regex classifier in `backend/nlp/classifier.py` for spaCy NER (`en_core_web_sm`) |
+| Herd-immunity colour scale | Vaccination map layer should colour counties relative to herd threshold — pivot at `disease.herd_threshold_pct` |
+| News deduplication | Contextualise signals against existing records by date window to avoid double-counting the same outbreak |
+| Month slider UX | Replace two separate From/To sliders with a single range bar with two draggable endpoints |
+| County panel — YoY analytics | Add YoY Δ% for vacc rate and confirmed case count (compare latest vs. prior year in DB) |
+| Analytics / BI chart view | Second view: time-series chart per disease/county with herd immunity benchmark line |
+| spaCy NLP upgrade | See plan doc — keep `extract_signals()` interface, swap internals |
 
 ---
 
@@ -151,7 +198,6 @@ The table below the map now includes Confirmed, Probable, Per-100k, and Vaccinat
 ```bash
 # 1. Start database
 docker compose up -d          # TimescaleDB on port 5432
-                              # (existing container: fl-outbreak-db)
 
 # 2. Backend
 source venv/bin/activate
@@ -159,15 +205,16 @@ uvicorn backend.api.main:app --host 0.0.0.0 --port 8000 --reload
 
 # 3. Frontend
 cd frontend && npm run dev    # http://localhost:3000
+# Login: any password (DASHBOARD_PASSWORD not set = dev mode)
 
 # One-time DB setup (already done)
 alembic upgrade head
 python scripts/seed_counties.py
-python scripts/seed_vaccination_rates.py
+python scripts/seed_vaccination_rates.py   # 2022–2024, 67 counties, 12 diseases
 python scripts/seed_article_signals.py
-# + inline disease seed (see conversation history)
+python scripts/seed_alerts.py              # 10 alerts (watch/warning/emergency)
 ```
 
-**Docker note:** The `docker-compose.yml` tries to start a container named `fl_outbreak_db` but port 5432 is already used by the pre-existing `fl-outbreak-db` container (same image, same DB). Use that container directly — no need to run `docker compose up` again unless that container is stopped.
+**GitHub auth:** Uses `gh` CLI (`gh auth login` — browser OAuth). `git push origin main` works after that. Remote: `https://github.com/J-Ballista/fl-outbreak-tracker.git`.
 
-**GitHub auth:** Uses `gh` CLI (`gh auth login` — browser OAuth). Plain `git push origin main` works after that. No SSH keys or PATs needed. Remote is `https://github.com/J-Ballista/fl-outbreak-tracker.git`.
+**Auth in dev:** Set `API_KEY` in `.env` (backend) and `DASHBOARD_PASSWORD` in `frontend/.env.local` to enable. Leave unset for open dev access.

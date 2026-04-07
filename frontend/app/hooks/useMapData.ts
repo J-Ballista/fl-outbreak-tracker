@@ -7,6 +7,7 @@ import {
   fetchCasesSummary,
   fetchVaccinationSummary,
   fetchCountyVaccRates,
+  fetchCountyVaccTrend,
   fetchNewsSignals,
   fetchAlerts,
   fetchCaseTrend,
@@ -50,6 +51,17 @@ export function useCountyVaccRates(fips_code: string | null | undefined) {
   return useSWR(
     fips_code ? ["county-vacc-rates", fips_code] : null,
     () => fetchCountyVaccRates(fips_code!),
+    { revalidateOnFocus: false }
+  );
+}
+
+export function useCountyVaccTrend(
+  fips_code: string | null | undefined,
+  disease_id?: number
+) {
+  return useSWR(
+    fips_code ? ["county-vacc-trend", fips_code, disease_id] : null,
+    () => fetchCountyVaccTrend(fips_code!, disease_id),
     { revalidateOnFocus: false }
   );
 }

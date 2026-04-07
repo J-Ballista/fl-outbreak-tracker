@@ -5,6 +5,7 @@ import type {
   CaseSummary,
   VaccinationSummary,
   CountyDiseaseVaccRate,
+  VaccTrendPoint,
   NewsSignal,
   Disease,
   Alert,
@@ -19,6 +20,7 @@ interface CountyDetailPanelProps {
   cases: CaseSummary | null;
   vaccSummary: VaccinationSummary | null;
   vaccByDisease: CountyDiseaseVaccRate[];
+  vaccTrend: VaccTrendPoint[];
   signals: NewsSignal[];
   diseases: Disease[];
   alerts: Alert[];
@@ -67,6 +69,7 @@ export default function CountyDetailPanel({
   cases,
   vaccSummary,
   vaccByDisease,
+  vaccTrend,
   signals,
   diseases,
   alerts,
@@ -88,19 +91,11 @@ export default function CountyDetailPanel({
     0
   );
 
-  // Compute vacc stats for the trend sparkline
-  const trendVaccPct: number | null = (() => {
-    if (selectedDiseaseId !== undefined) {
-      return vaccByDisease.find((r) => r.disease_id === selectedDiseaseId)?.vaccinated_pct ?? null;
-    }
-    return vaccSummary?.vaccinated_pct ?? null;
-  })();
-
+  // Herd threshold for the sparkline dotted line
   const trendHerdThreshold: number | null = (() => {
     if (selectedDiseaseId !== undefined) {
       return diseases.find((d) => d.id === selectedDiseaseId)?.herd_threshold_pct ?? null;
     }
-    // Composite average of all diseases that have a threshold
     const thresholds = diseases
       .map((d) => d.herd_threshold_pct)
       .filter((t): t is number => t != null);
@@ -210,11 +205,11 @@ export default function CountyDetailPanel({
               </h3>
               <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200">
                 <TrendSparkline
-                  data={trend}
-                  vaccPct={trendVaccPct}
+                  caseTrend={trend}
+                  vaccTrend={vaccTrend}
                   herdThreshold={trendHerdThreshold}
                   width={292}
-                  height={160}
+                  height={190}
                 />
               </div>
             </section>

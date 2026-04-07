@@ -2,12 +2,12 @@
 
 import { useEffect, useRef } from "react";
 import * as d3 from "d3";
-import type { TrendPoint } from "@/app/lib/api";
+import type { TrendPoint, VaccTrendPoint } from "@/app/lib/api";
 
 interface Props {
-  data: TrendPoint[];
-  vaccPct?: number | null;
-  herdThreshold?: number | null;
+  caseTrend: TrendPoint[];
+  vaccTrend?: VaccTrendPoint[];       // year-over-year vaccination rates
+  herdThreshold?: number | null;      // static dotted reference line (0–100)
   width?: number;
   height?: number;
 }
@@ -16,27 +16,9 @@ function fmt(v: number): string {
   return v % 1 === 0 ? String(v) : v.toFixed(1);
 }
 
-const LABEL_MIN_GAP = 18; // px between two labels before we start nudging
-
-/**
- * Given two desired y positions for labels, return adjusted positions
- * that are guaranteed to be at least LABEL_MIN_GAP apart.
- * The pair is shifted symmetrically around their midpoint.
- */
-function separateLabels(ya: number, yb: number): [number, number] {
-  const gap = Math.abs(ya - yb);
-  if (gap >= LABEL_MIN_GAP) return [ya, yb];
-  const mid = (ya + yb) / 2;
-  const half = LABEL_MIN_GAP / 2;
-  // keep relative order
-  return ya <= yb
-    ? [mid - half, mid + half]
-    : [mid + half, mid - half];
-}
-
 export default function TrendSparkline({
-  data,
-  vaccPct,
+  caseTrend,
+  vaccTrend = [],
   herdThreshold,
   width = 292,
   height = 190,
@@ -49,7 +31,7 @@ export default function TrendSparkline({
     const svg = d3.select(svgRef.current);
     svg.selectAll("*").remove();
 
-    const hasVacc = vaccPct != null || herdThreshold != null;
+    const hasVacc = vaccTrend.length > 0 || herdThreshold != null;
     const margin = { top: 16, right: hasVacc ? 52 : 14, bottom: 32, left: 44 };
     const w = width - margin.left - margin.right;
     const h = height - margin.top - margin.bottom;
@@ -58,7 +40,7 @@ export default function TrendSparkline({
       .append("g")
       .attr("transform", `translate(${margin.left},${margin.top})`);
 
-    if (data.length === 0) {
+    if (caseTrend.length === 0) {
       g.append("text")
         .attr("x", w / 2).attr("y", h / 2)
         .attr("text-anchor", "middle")
@@ -67,36 +49,54 @@ export default function TrendSparkline({
       return;
     }
 
-    const parsed = data.map((d) => ({
+    const parsedCases = caseTrend.map((d) => ({
       date: new Date(d.report_date),
       value: d.total_cases,
     }));
 
-    // ── Scales ───────────────────────────────────────────────────────────────
+    // Convert yearly vacc data to dates (Jul 1 of each year — mid-year)
+    const parsedVacc = vaccTrend.map((d) => ({
+      date: new Date(d.survey_year, 6, 1),
+      value: d.vaccinated_pct,
+    }));
 
+    // ── Shared X scale across both datasets ──────────────────────────────────
+
+    const allDates = [
+      ...parsedCases.map((d) => d.date),
+      ...parsedVacc.map((d) => d.date),
+    ];
     const xScale = d3
       .scaleTime()
-      .domain(d3.extent(parsed, (d) => d.date) as [Date, Date])
+      .domain(d3.extent(allDates) as [Date, Date])
       .range([0, w]);
 
-    const maxCases = d3.max(parsed, (d) => d.value) ?? 1;
+    // ── Left Y scale — cases ─────────────────────────────────────────────────
+
+    const maxCases = d3.max(parsedCases, (d) => d.value) ?? 1;
     const yLeft = d3
       .scaleLinear()
       .domain([0, maxCases * 1.15])
       .range([h, 0])
       .nice();
 
-    // Tighten right-axis domain so lines sit mid-chart, not in the top sliver
-    const vaccValues = [vaccPct, herdThreshold].filter((v): v is number => v != null);
-    const spread = vaccValues.length >= 2
-      ? Math.max(10, Math.abs(vaccValues[0] - vaccValues[1]) * 2)
-      : 12;
+    // ── Right Y scale — vaccination % ────────────────────────────────────────
+
+    const vaccValues = [
+      ...parsedVacc.map((d) => d.value),
+      ...(herdThreshold != null ? [herdThreshold] : []),
+    ];
     const vaccCenter = vaccValues.length
       ? vaccValues.reduce((a, b) => a + b, 0) / vaccValues.length
       : 85;
+    const spread = Math.max(
+      10,
+      vaccValues.length >= 2
+        ? (Math.max(...vaccValues) - Math.min(...vaccValues)) * 1.5
+        : 12
+    );
     const vaccMin = Math.max(0, vaccCenter - spread);
     const vaccMax = Math.min(100, vaccCenter + spread);
-
     const yRight = d3.scaleLinear().domain([vaccMin, vaccMax]).range([h, 0]);
 
     // ── Grid lines ───────────────────────────────────────────────────────────
@@ -110,7 +110,7 @@ export default function TrendSparkline({
           .attr("stroke-dasharray", "3,3")
       );
 
-    // ── Left axis — case counts ───────────────────────────────────────────────
+    // ── Left axis ────────────────────────────────────────────────────────────
 
     g.append("g")
       .call(
@@ -130,7 +130,7 @@ export default function TrendSparkline({
       .attr("fill", "#ef4444").attr("font-size", 10).attr("font-weight", "600")
       .text("Cases");
 
-    // ── Right axis — vaccination % ────────────────────────────────────────────
+    // ── Right axis ───────────────────────────────────────────────────────────
 
     if (hasVacc) {
       g.append("g")
@@ -150,144 +150,134 @@ export default function TrendSparkline({
         .text("Vacc %");
     }
 
-    // ── Bottom X axis ─────────────────────────────────────────────────────────
+    // ── Bottom X axis — always pin last case date ────────────────────────────
 
-    // Build X tick values: auto ticks + always include the last data point,
-    // dropping any auto tick that falls within 20px of the last date.
-    const lastDate = parsed[parsed.length - 1].date;
+    const lastDate = parsedCases[parsedCases.length - 1].date;
     const lastPx   = xScale(lastDate);
-    const autoTicks = xScale.ticks(Math.min(parsed.length, 5));
+    const autoTicks = xScale.ticks(Math.min(parsedCases.length, 5));
     const filteredTicks = autoTicks.filter(
       (t) => Math.abs(xScale(t) - lastPx) > 20
     );
-    const tickValues = [...filteredTicks, lastDate];
 
     g.append("g")
       .attr("transform", `translate(0,${h})`)
       .call(
         d3.axisBottom(xScale)
-          .tickValues(tickValues)
+          .tickValues([...filteredTicks, lastDate])
           .tickFormat(d3.timeFormat("%b '%y") as (v: Date | d3.NumberValue) => string)
       )
       .call((ag) => ag.select(".domain").attr("stroke", "#cbd5e1"))
       .call((ag) => {
-        // Bold + red the last tick so it stands out
-        ag.selectAll(".tick text")
-          .attr("fill", "#475569")
-          .attr("font-size", 11);
+        ag.selectAll(".tick text").attr("fill", "#475569").attr("font-size", 11);
         ag.selectAll(".tick:last-child text")
-          .attr("fill", "#ef4444")
-          .attr("font-weight", "700");
+          .attr("fill", "#ef4444").attr("font-weight", "700");
       })
       .call((ag) => ag.selectAll(".tick line").attr("stroke", "#cbd5e1"));
 
-    // ── Case area + line (red) ────────────────────────────────────────────────
+    // ── Case area + line (red) ───────────────────────────────────────────────
 
-    const area = d3.area<{ date: Date; value: number }>()
-      .x((d) => xScale(d.date))
-      .y0(h).y1((d) => yLeft(d.value))
-      .curve(d3.curveMonotoneX);
+    g.append("path")
+      .datum(parsedCases)
+      .attr("fill", "rgba(239,68,68,0.10)")
+      .attr(
+        "d",
+        d3.area<{ date: Date; value: number }>()
+          .x((d) => xScale(d.date))
+          .y0(h).y1((d) => yLeft(d.value))
+          .curve(d3.curveMonotoneX)
+      );
 
-    const line = d3.line<{ date: Date; value: number }>()
-      .x((d) => xScale(d.date))
-      .y((d) => yLeft(d.value))
-      .curve(d3.curveMonotoneX);
-
-    g.append("path").datum(parsed)
-      .attr("fill", "rgba(239,68,68,0.12)")
-      .attr("d", area);
-
-    g.append("path").datum(parsed)
+    g.append("path")
+      .datum(parsedCases)
       .attr("fill", "none")
       .attr("stroke", "#ef4444")
       .attr("stroke-width", 2.5)
-      .attr("d", line);
+      .attr(
+        "d",
+        d3.line<{ date: Date; value: number }>()
+          .x((d) => xScale(d.date))
+          .y((d) => yLeft(d.value))
+          .curve(d3.curveMonotoneX)
+      );
 
-    // ── Vacc/herd lines with non-overlapping labels ───────────────────────────
+    // ── Vaccination trend line (dark green, right axis) ──────────────────────
 
-    const rawHerdY  = herdThreshold != null ? yRight(herdThreshold) : null;
-    const rawVaccY  = vaccPct       != null ? yRight(vaccPct)        : null;
+    if (parsedVacc.length > 0) {
+      // Dots at each survey year
+      g.selectAll("circle.vacc-dot")
+        .data(parsedVacc)
+        .join("circle")
+        .attr("class", "vacc-dot")
+        .attr("cx", (d) => xScale(d.date))
+        .attr("cy", (d) => yRight(d.value))
+        .attr("r", 4)
+        .attr("fill", "#15803d")
+        .attr("stroke", "#fff")
+        .attr("stroke-width", 1.5);
 
-    // Separate labels so they never overlap
-    let labelHerdY = rawHerdY;
-    let labelVaccY = rawVaccY;
-
-    if (rawHerdY != null && rawVaccY != null) {
-      [labelHerdY, labelVaccY] = separateLabels(rawHerdY, rawVaccY);
+      if (parsedVacc.length > 1) {
+        g.append("path")
+          .datum(parsedVacc)
+          .attr("fill", "none")
+          .attr("stroke", "#15803d")
+          .attr("stroke-width", 2.5)
+          .attr(
+            "d",
+            d3.line<{ date: Date; value: number }>()
+              .x((d) => xScale(d.date))
+              .y((d) => yRight(d.value))
+              .curve(d3.curveMonotoneX)
+          );
+      }
     }
 
-    // Draw herd threshold — label on LEFT side
-    if (herdThreshold != null && rawHerdY != null) {
+    // ── Herd threshold static dotted line (amber) ────────────────────────────
+
+    if (herdThreshold != null) {
+      const ty = yRight(herdThreshold);
       g.append("line")
         .attr("x1", 0).attr("x2", w)
-        .attr("y1", rawHerdY).attr("y2", rawHerdY)
+        .attr("y1", ty).attr("y2", ty)
         .attr("stroke", "#d97706")
         .attr("stroke-width", 2)
         .attr("stroke-dasharray", "6,4");
 
+      // Label on left
       g.append("text")
-        .attr("x", 4).attr("y", (labelHerdY ?? rawHerdY) - 4)
+        .attr("x", 4).attr("y", ty - 5)
         .attr("fill", "#d97706")
         .attr("font-size", 12).attr("font-weight", "700")
         .text(`Herd ${fmt(herdThreshold)}%`);
     }
 
-    // Draw vaccination rate — label on RIGHT side (text-anchor end)
-    if (vaccPct != null && rawVaccY != null) {
-      g.append("line")
-        .attr("x1", 0).attr("x2", w)
-        .attr("y1", rawVaccY).attr("y2", rawVaccY)
-        .attr("stroke", "#15803d")
-        .attr("stroke-width", 2.5);
-
-      g.append("text")
-        .attr("x", w - 4).attr("y", (labelVaccY ?? rawVaccY) - 4)
-        .attr("text-anchor", "end")
-        .attr("fill", "#15803d")
-        .attr("font-size", 12).attr("font-weight", "700")
-        .text(`Vacc ${fmt(vaccPct)}%`);
-    }
-
-    // ── Interactive hover overlay ─────────────────────────────────────────────
+    // ── Interactive hover ────────────────────────────────────────────────────
 
     const bisectDate = d3.bisector((d: { date: Date }) => d.date).left;
 
-    // Hover elements (hidden by default)
-    const hoverGroup = g.append("g").attr("class", "hover").style("display", "none");
+    const hoverGroup = g.append("g").style("display", "none");
 
     hoverGroup.append("line")
-      .attr("class", "hover-line")
+      .attr("class", "h-line")
       .attr("y1", 0).attr("y2", h)
-      .attr("stroke", "#94a3b8")
-      .attr("stroke-width", 1)
-      .attr("stroke-dasharray", "3,3");
+      .attr("stroke", "#94a3b8").attr("stroke-width", 1).attr("stroke-dasharray", "3,3");
 
     hoverGroup.append("circle")
-      .attr("class", "hover-dot")
-      .attr("r", 4)
-      .attr("fill", "#ef4444")
-      .attr("stroke", "#fff")
-      .attr("stroke-width", 2);
+      .attr("class", "h-dot-case")
+      .attr("r", 4.5)
+      .attr("fill", "#ef4444").attr("stroke", "#fff").attr("stroke-width", 2);
 
-    // Tooltip box (group with rect + two text lines)
-    const tipGroup = hoverGroup.append("g").attr("class", "tip");
+    hoverGroup.append("circle")
+      .attr("class", "h-dot-vacc")
+      .attr("r", 4.5)
+      .attr("fill", "#15803d").attr("stroke", "#fff").attr("stroke-width", 2)
+      .style("display", "none");
 
-    const tipRect = tipGroup.append("rect")
-      .attr("rx", 4)
-      .attr("fill", "#1e293b")
-      .attr("opacity", 0.88);
+    const tipG = hoverGroup.append("g");
+    const tipRect = tipG.append("rect").attr("rx", 4).attr("fill", "#1e293b").attr("opacity", 0.9);
+    const tipDate  = tipG.append("text").attr("fill", "#94a3b8").attr("font-size", 10).attr("font-weight", "500");
+    const tipCases = tipG.append("text").attr("fill", "#fca5a5").attr("font-size", 12).attr("font-weight", "700");
+    const tipVacc  = tipG.append("text").attr("fill", "#86efac").attr("font-size", 11).attr("font-weight", "600");
 
-    const tipDate = tipGroup.append("text")
-      .attr("fill", "#94a3b8")
-      .attr("font-size", 10)
-      .attr("font-weight", "500");
-
-    const tipValue = tipGroup.append("text")
-      .attr("fill", "#fca5a5")
-      .attr("font-size", 12)
-      .attr("font-weight", "700");
-
-    // Invisible overlay rect to capture mouse events
     g.append("rect")
       .attr("width", w).attr("height", h)
       .attr("fill", "none")
@@ -295,48 +285,62 @@ export default function TrendSparkline({
       .on("mousemove", function (event: MouseEvent) {
         const [mx] = d3.pointer(event, this);
         const x0 = xScale.invert(mx);
-        const idx = bisectDate(parsed, x0, 1);
-        const d0 = parsed[idx - 1];
-        const d1 = parsed[idx];
-        const pt =
-          !d1 || (x0.valueOf() - d0.date.valueOf() < d1.date.valueOf() - x0.valueOf())
-            ? d0
-            : d1;
 
-        const px = xScale(pt.date);
-        const py = yLeft(pt.value);
+        // Nearest case point
+        const ci = bisectDate(parsedCases, x0, 1);
+        const c0 = parsedCases[ci - 1];
+        const c1 = parsedCases[ci];
+        const cp =
+          !c1 || x0.valueOf() - c0.date.valueOf() < c1.date.valueOf() - x0.valueOf()
+            ? c0 : c1;
+
+        const cpx = xScale(cp.date);
+        const cpy = yLeft(cp.value);
 
         hoverGroup.style("display", null);
-        hoverGroup.select(".hover-line").attr("x1", px).attr("x2", px);
-        hoverGroup.select(".hover-dot").attr("cx", px).attr("cy", py);
+        hoverGroup.select(".h-line").attr("x1", cpx).attr("x2", cpx);
+        hoverGroup.select(".h-dot-case").attr("cx", cpx).attr("cy", cpy);
 
-        const dateStr = pt.date.toLocaleDateString("en-US", {
-          month: "short",
-          year: "numeric",
-        });
-        const valStr = pt.value.toLocaleString();
+        // Nearest vacc point
+        let vaccLine = "";
+        if (parsedVacc.length > 0) {
+          const vi = bisectDate(parsedVacc, x0, 1);
+          const v0 = parsedVacc[Math.max(0, vi - 1)];
+          const v1 = parsedVacc[vi];
+          const vp =
+            !v1 || x0.valueOf() - v0.date.valueOf() < v1.date.valueOf() - x0.valueOf()
+              ? v0 : v1;
+          const vpy = yRight(vp.value);
+          hoverGroup.select(".h-dot-vacc").style("display", null)
+            .attr("cx", xScale(vp.date)).attr("cy", vpy);
+          vaccLine = `Vacc ${fmt(vp.value)}% (${vp.date.getFullYear()})`;
+        } else {
+          hoverGroup.select(".h-dot-vacc").style("display", "none");
+        }
 
-        tipDate.attr("x", 0).attr("y", 0).text(dateStr);
-        tipValue.attr("x", 0).attr("y", 13).text(`${valStr} cases`);
+        const dateStr = cp.date.toLocaleDateString("en-US", { month: "short", year: "numeric" });
 
-        // Measure text to size the rect
-        const dateW = (tipDate.node() as SVGTextElement).getBBox().width;
-        const valW  = (tipValue.node() as SVGTextElement).getBBox().width;
-        const boxW  = Math.max(dateW, valW) + 12;
-        const boxH  = 30;
+        tipDate.attr("x", 6).attr("y", 14).text(dateStr);
+        tipCases.attr("x", 6).attr("y", 30).text(`${cp.value.toLocaleString()} cases`);
+        tipVacc.attr("x", 6).attr("y", 45).text(vaccLine).style("display", vaccLine ? "" : "none");
 
-        // Keep tooltip on screen
-        let tipX = px + 8;
-        if (tipX + boxW > w) tipX = px - boxW - 8;
-        const tipY = Math.max(0, py - boxH / 2);
+        const lineCount = vaccLine ? 3 : 2;
+        const boxW = Math.max(
+          (tipDate.node() as SVGTextElement).getBBox().width,
+          (tipCases.node() as SVGTextElement).getBBox().width,
+          vaccLine ? (tipVacc.node() as SVGTextElement).getBBox().width : 0,
+        ) + 18;
+        const boxH = lineCount === 3 ? 54 : 38;
 
-        tipGroup.attr("transform", `translate(${tipX},${tipY})`);
-        tipRect.attr("x", -2).attr("y", -2).attr("width", boxW).attr("height", boxH);
-        tipDate.attr("x", 4);
-        tipValue.attr("x", 4);
+        let tipX = cpx + 10;
+        if (tipX + boxW > w) tipX = cpx - boxW - 10;
+        const tipY = Math.max(0, Math.min(cpy - boxH / 2, h - boxH));
+
+        tipG.attr("transform", `translate(${tipX},${tipY})`);
+        tipRect.attr("x", 0).attr("y", 0).attr("width", boxW).attr("height", boxH);
       })
       .on("mouseleave", () => hoverGroup.style("display", "none"));
-  }, [data, vaccPct, herdThreshold, width, height]);
+  }, [caseTrend, vaccTrend, herdThreshold, width, height]);
 
   return (
     <div>
@@ -346,10 +350,10 @@ export default function TrendSparkline({
           <span className="inline-block w-5 bg-red-500" style={{ height: 2 }} />
           Cases (left axis)
         </span>
-        {vaccPct != null && (
+        {vaccTrend.length > 0 && (
           <span className="flex items-center gap-1.5">
             <span className="inline-block w-5 bg-green-700" style={{ height: 2 }} />
-            Vacc rate (right axis) — survey snapshot
+            Vacc rate YoY (right axis)
           </span>
         )}
         {herdThreshold != null && (
@@ -366,11 +370,6 @@ export default function TrendSparkline({
           </span>
         )}
       </div>
-      {vaccPct != null && (
-        <p className="mt-1 text-[10px] text-slate-400 italic">
-          Vaccination rate is a fixed survey snapshot, not a time series.
-        </p>
-      )}
     </div>
   );
 }

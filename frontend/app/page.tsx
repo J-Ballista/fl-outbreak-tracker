@@ -10,6 +10,7 @@ import {
   useDiseases,
   useVaccinationSummary,
   useCountyVaccRates,
+  useCountyVaccTrend,
   useNewsSignals,
   useAlerts,
   useCaseTrend,
@@ -55,6 +56,10 @@ export default function DashboardPage() {
     disease_id: selectedDiseaseId,
   });
   const { data: countyVaccRates = [] } = useCountyVaccRates(selectedCounty?.fips);
+  const { data: countyVaccTrend = [] } = useCountyVaccTrend(
+    selectedCounty?.fips,
+    selectedDiseaseId
+  );
   const { data: newsSignals = [] } = useNewsSignals({
     county_fips: selectedCounty?.fips,
     disease_id: selectedDiseaseId,
@@ -390,6 +395,7 @@ export default function DashboardPage() {
         cases={selectedCountyCases}
         vaccSummary={selectedCountyVacc}
         vaccByDisease={countyVaccRates}
+        vaccTrend={countyVaccTrend}
         signals={newsSignals}
         diseases={diseases}
         alerts={countyAlerts}
