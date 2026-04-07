@@ -218,3 +218,11 @@ python scripts/seed_alerts.py              # 10 alerts (watch/warning/emergency)
 **GitHub auth:** Uses `gh` CLI (`gh auth login` — browser OAuth). `git push origin main` works after that. Remote: `https://github.com/J-Ballista/fl-outbreak-tracker.git`.
 
 **Auth in dev:** Set `API_KEY` in `.env` (backend) and `DASHBOARD_PASSWORD` in `frontend/.env.local` to enable. Leave unset for open dev access.
+
+**Important — backend restart:** `uvicorn --reload` does NOT always auto-reload when new route files are added. After adding new endpoints, always explicitly kill and restart uvicorn:
+```bash
+pkill -f "uvicorn backend.api.main"
+source venv/bin/activate
+uvicorn backend.api.main:app --host 0.0.0.0 --port 8000 --reload
+```
+Symptom of stale backend: new endpoints return `{"detail":"Not Found"}` (404).
