@@ -35,6 +35,8 @@ class CaseSummary(BaseModel):
     """Aggregated case totals per county for choropleth rendering."""
     county_fips: str
     total_cases: int
+    confirmed_total: int
+    probable_total: int
 
 
 # ---------------------------------------------------------------------------
@@ -86,6 +88,8 @@ async def cases_summary(
         select(
             DiseaseCase.county_fips,
             func.sum(DiseaseCase.case_count).label("total_cases"),
+            func.coalesce(func.sum(DiseaseCase.confirmed_count), 0).label("confirmed_total"),
+            func.coalesce(func.sum(DiseaseCase.probable_count), 0).label("probable_total"),
         )
         .group_by(DiseaseCase.county_fips)
     )
@@ -99,6 +103,11 @@ async def cases_summary(
 
     result = await db.execute(q)
     return [
-        CaseSummary(county_fips=row.county_fips, total_cases=int(row.total_cases))
+        CaseSummary(
+            county_fips=row.county_fips,
+            total_cases=int(row.total_cases),
+            confirmed_total=int(row.confirmed_total),
+            probable_total=int(row.probable_total),
+        )
         for row in result.all()
     ]

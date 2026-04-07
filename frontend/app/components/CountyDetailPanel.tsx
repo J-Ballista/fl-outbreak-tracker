@@ -1,0 +1,248 @@
+"use client";
+
+import type {
+  County,
+  CaseSummary,
+  VaccinationSummary,
+  CountyDiseaseVaccRate,
+  NewsSignal,
+  Disease,
+} from "@/app/lib/api";
+
+interface CountyDetailPanelProps {
+  county: County | null;
+  cases: CaseSummary | null;
+  vaccSummary: VaccinationSummary | null;       // overall avg for the county (for map toggle)
+  vaccByDisease: CountyDiseaseVaccRate[];        // per-disease breakdown
+  signals: NewsSignal[];
+  diseases: Disease[];
+  onClose: () => void;
+}
+
+function ConfidenceBadge({ value }: { value: number | null }) {
+  if (value === null) return null;
+  const pct = Math.round((value ?? 0) * 100);
+  const color =
+    pct >= 85 ? "bg-green-100 text-green-700" :
+    pct >= 65 ? "bg-yellow-100 text-yellow-700" :
+                "bg-slate-100 text-slate-500";
+  return (
+    <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${color}`}>
+      {pct}% conf
+    </span>
+  );
+}
+
+export default function CountyDetailPanel({
+  county,
+  cases,
+  vaccSummary,
+  vaccByDisease,
+  signals,
+  diseases,
+  onClose,
+}: CountyDetailPanelProps) {
+  const open = county !== null;
+
+  function diseaseName(id: number | null) {
+    if (id === null) return "Unknown";
+    return diseases.find((d) => d.id === id)?.name ?? `Disease ${id}`;
+  }
+
+  return (
+    <>
+      {/* Backdrop */}
+      {open && (
+        <div
+          className="fixed inset-0 z-40 bg-black/20 backdrop-blur-[1px]"
+          onClick={onClose}
+        />
+      )}
+
+      {/* Panel */}
+      <div
+        className={`fixed top-0 right-0 h-full w-[360px] bg-white shadow-2xl z-50 flex flex-col
+          transform transition-transform duration-300 ease-in-out
+          ${open ? "translate-x-0" : "translate-x-full"}`}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between bg-blue-900 px-5 py-4 shrink-0">
+          <h2 className="text-base font-semibold text-white truncate">
+            {county?.name ?? ""} County
+          </h2>
+          <button
+            onClick={onClose}
+            aria-label="Close panel"
+            className="ml-3 shrink-0 text-blue-200 hover:text-white text-xl leading-none"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6">
+          {/* ── Cases KPIs ── */}
+          <section>
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Cases (selected period)
+            </h3>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { label: "Total",     value: cases?.total_cases     ?? 0 },
+                { label: "Confirmed", value: cases?.confirmed_total ?? 0 },
+                { label: "Probable",  value: cases?.probable_total  ?? 0 },
+              ].map(({ label, value }) => (
+                <div
+                  key={label}
+                  className="rounded-lg bg-slate-50 p-3 text-center ring-1 ring-slate-200"
+                >
+                  <p className="text-xl font-bold text-slate-800">
+                    {value.toLocaleString()}
+                  </p>
+                  <p className="mt-0.5 text-xs text-slate-500">{label}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* ── Vaccination Rate ── */}
+          {vaccSummary !== null && (
+            <section>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                Vaccination Rate
+                <span className="ml-2 font-normal text-slate-400 normal-case">
+                  {vaccSummary.survey_year} survey
+                </span>
+              </h3>
+
+              {/* Overall bar */}
+              <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200 mb-3">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-sm font-medium text-slate-700">
+                    {vaccSummary.vaccinated_pct.toFixed(1)}% avg across diseases
+                  </span>
+                </div>
+                <div className="h-2 w-full rounded-full bg-slate-200 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-green-500 transition-all"
+                    style={{ width: `${Math.min(vaccSummary.vaccinated_pct, 100)}%` }}
+                  />
+                </div>
+                {vaccSummary.vaccinated_pct < 90 && (
+                  <p className="mt-1.5 text-xs text-amber-600 font-medium">
+                    Below recommended 90% threshold
+                  </p>
+                )}
+              </div>
+
+              {/* Per-disease table */}
+              {vaccByDisease.length > 0 && (
+                <div className="overflow-hidden rounded-lg ring-1 ring-slate-200">
+                  <table className="min-w-full text-xs">
+                    <thead className="bg-slate-50">
+                      <tr>
+                        <th className="px-3 py-2 text-left text-slate-500 font-medium">
+                          Disease
+                        </th>
+                        <th className="px-3 py-2 text-right text-slate-500 font-medium">
+                          Vacc %
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {vaccByDisease
+                        .slice()
+                        .sort((a, b) => a.vaccinated_pct - b.vaccinated_pct)
+                        .map((r) => (
+                          <tr key={r.disease_id} className="hover:bg-slate-50">
+                            <td className="px-3 py-1.5 text-slate-700">
+                              {diseaseName(r.disease_id)}
+                            </td>
+                            <td
+                              className={`px-3 py-1.5 text-right font-medium ${
+                                r.vaccinated_pct < 85
+                                  ? "text-red-600"
+                                  : r.vaccinated_pct < 90
+                                  ? "text-amber-600"
+                                  : "text-green-700"
+                              }`}
+                            >
+                              {r.vaccinated_pct.toFixed(1)}%
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          )}
+
+          {/* ── News Signals ── */}
+          <section>
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+              News Signals
+              {signals.length > 0 && (
+                <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-blue-700">
+                  {signals.length}
+                </span>
+              )}
+            </h3>
+
+            {signals.length === 0 ? (
+              <p className="text-sm text-slate-400 italic">
+                No news signals for this county.
+              </p>
+            ) : (
+              <ul className="space-y-3">
+                {signals.map((sig) => {
+                  const pubDate = sig.article_published_at
+                    ? new Date(sig.article_published_at).toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric",
+                      })
+                    : null;
+
+                  return (
+                    <li
+                      key={sig.id}
+                      className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200"
+                    >
+                      <a
+                        href={sig.article_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm font-medium text-blue-700 hover:text-blue-900 hover:underline leading-snug"
+                      >
+                        {sig.article_title ?? sig.article_url}
+                      </a>
+                      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+                        {sig.article_source && (
+                          <span className="text-xs text-slate-500">
+                            {sig.article_source}
+                          </span>
+                        )}
+                        {pubDate && (
+                          <span className="text-xs text-slate-400">· {pubDate}</span>
+                        )}
+                        <span className="text-xs text-slate-400">
+                          · {diseaseName(sig.disease_id)}
+                        </span>
+                        {sig.extracted_case_count !== null && (
+                          <span className="text-xs font-medium text-slate-600">
+                            ~{sig.extracted_case_count} cases
+                          </span>
+                        )}
+                        <ConfidenceBadge value={sig.confidence} />
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+        </div>
+      </div>
+    </>
+  );
+}

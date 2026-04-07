@@ -25,6 +25,35 @@ export interface Disease {
 export interface CaseSummary {
   county_fips: string;
   total_cases: number;
+  confirmed_total: number;
+  probable_total: number;
+}
+
+export interface VaccinationSummary {
+  county_fips: string;
+  vaccinated_pct: number;
+  exempt_medical_pct: number | null;
+  exempt_religious_pct: number | null;
+  survey_year: number;
+}
+
+export interface CountyDiseaseVaccRate {
+  disease_id: number;
+  vaccinated_pct: number;
+  survey_year: number;
+}
+
+export interface NewsSignal {
+  id: number;
+  county_fips: string | null;
+  disease_id: number | null;
+  extracted_case_count: number | null;
+  confidence: number | null;
+  article_id: number;
+  article_title: string | null;
+  article_url: string;
+  article_source: string | null;
+  article_published_at: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -57,4 +86,36 @@ export function fetchCasesSummary(params: {
   if (params.date_to) qs.set("date_to", params.date_to);
   const query = qs.toString() ? `?${qs}` : "";
   return get<CaseSummary[]>(`/cases/summary${query}`);
+}
+
+export function fetchVaccinationSummary(params: {
+  disease_id?: number;
+  survey_year?: number;
+}): Promise<VaccinationSummary[]> {
+  const qs = new URLSearchParams();
+  if (params.disease_id !== undefined)
+    qs.set("disease_id", String(params.disease_id));
+  if (params.survey_year !== undefined)
+    qs.set("survey_year", String(params.survey_year));
+  const query = qs.toString() ? `?${qs}` : "";
+  return get<VaccinationSummary[]>(`/vaccination-rates/summary${query}`);
+}
+
+export function fetchCountyVaccRates(fips_code: string, survey_year?: number): Promise<CountyDiseaseVaccRate[]> {
+  const qs = survey_year !== undefined ? `?survey_year=${survey_year}` : "";
+  return get<CountyDiseaseVaccRate[]>(`/vaccination-rates/county/${fips_code}${qs}`);
+}
+
+export function fetchNewsSignals(params: {
+  county_fips?: string;
+  disease_id?: number;
+  limit?: number;
+}): Promise<NewsSignal[]> {
+  const qs = new URLSearchParams();
+  if (params.county_fips) qs.set("county_fips", params.county_fips);
+  if (params.disease_id !== undefined)
+    qs.set("disease_id", String(params.disease_id));
+  if (params.limit !== undefined) qs.set("limit", String(params.limit));
+  const query = qs.toString() ? `?${qs}` : "";
+  return get<NewsSignal[]>(`/news/signals${query}`);
 }

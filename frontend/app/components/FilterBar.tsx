@@ -1,6 +1,7 @@
 "use client";
 
 import { Disease } from "@/app/lib/api";
+import MonthRangeSlider from "./MonthRangeSlider";
 
 interface FilterBarProps {
   diseases: Disease[];
@@ -8,8 +9,7 @@ interface FilterBarProps {
   dateFrom: string;
   dateTo: string;
   onDiseaseChange: (id: number | undefined) => void;
-  onDateFromChange: (d: string) => void;
-  onDateToChange: (d: string) => void;
+  onDateChange: (from: string, to: string) => void;
 }
 
 export default function FilterBar({
@@ -18,11 +18,10 @@ export default function FilterBar({
   dateFrom,
   dateTo,
   onDiseaseChange,
-  onDateFromChange,
-  onDateToChange,
+  onDateChange,
 }: FilterBarProps) {
   return (
-    <div className="flex flex-wrap items-center gap-4 rounded-xl bg-white px-5 py-3 shadow-sm ring-1 ring-slate-200">
+    <div className="flex flex-wrap items-center gap-6 rounded-xl bg-white px-5 py-3 shadow-sm ring-1 ring-slate-200">
       {/* Disease picker */}
       <div className="flex items-center gap-2">
         <label
@@ -50,31 +49,12 @@ export default function FilterBar({
         </select>
       </div>
 
-      {/* Date range */}
-      <div className="flex items-center gap-2">
-        <label htmlFor="date-from" className="text-sm font-medium text-slate-600">
-          From
-        </label>
-        <input
-          id="date-from"
-          type="date"
-          className="rounded-md border border-slate-300 px-2 py-1 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          value={dateFrom}
-          onChange={(e) => onDateFromChange(e.target.value)}
-        />
-      </div>
-      <div className="flex items-center gap-2">
-        <label htmlFor="date-to" className="text-sm font-medium text-slate-600">
-          To
-        </label>
-        <input
-          id="date-to"
-          type="date"
-          className="rounded-md border border-slate-300 px-2 py-1 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          value={dateTo}
-          onChange={(e) => onDateToChange(e.target.value)}
-        />
-      </div>
+      {/* Month range slider */}
+      <MonthRangeSlider
+        dateFrom={dateFrom}
+        dateTo={dateTo}
+        onChange={onDateChange}
+      />
     </div>
   );
 }

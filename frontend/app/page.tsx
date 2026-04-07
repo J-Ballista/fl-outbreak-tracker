@@ -3,7 +3,16 @@
 import { useState, useMemo } from "react";
 import dynamic from "next/dynamic";
 import FilterBar from "@/app/components/FilterBar";
-import { useCasesSummary, useCounties, useDiseases } from "@/app/hooks/useMapData";
+import CountyDetailPanel from "@/app/components/CountyDetailPanel";
+import {
+  useCasesSummary,
+  useCounties,
+  useDiseases,
+  useVaccinationSummary,
+  useCountyVaccRates,
+  useNewsSignals,
+} from "@/app/hooks/useMapData";
+import type { LayerMode } from "@/app/components/FloridaMap";
 
 // FloridaMap uses D3 DOM APIs — load client-side only
 const FloridaMap = dynamic(() => import("@/app/components/FloridaMap"), {
@@ -16,12 +25,18 @@ const FloridaMap = dynamic(() => import("@/app/components/FloridaMap"), {
 });
 
 export default function DashboardPage() {
-  // Filter state
+  // ── Filter state ──
   const [selectedDiseaseId, setSelectedDiseaseId] = useState<number | undefined>();
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
-  // Data fetching
+  // ── Layer toggle ──
+  const [layerMode, setLayerMode] = useState<LayerMode>("cases");
+
+  // ── Selected county for detail panel ──
+  const [selectedCounty, setSelectedCounty] = useState<{ fips: string; name: string } | null>(null);
+
+  // ── Data fetching ──
   const { data: counties = [] } = useCounties();
   const { data: diseases = [] } = useDiseases();
   const { data: summaryRows = [], isLoading: summaryLoading } = useCasesSummary({
@@ -29,14 +44,27 @@ export default function DashboardPage() {
     date_from: dateFrom || undefined,
     date_to: dateTo || undefined,
   });
+  const { data: vaccRows = [] } = useVaccinationSummary({
+    disease_id: selectedDiseaseId,
+  });
+  const { data: countyVaccRates = [] } = useCountyVaccRates(selectedCounty?.fips);
+  const { data: newsSignals = [] } = useNewsSignals({
+    county_fips: selectedCounty?.fips,
+    disease_id: selectedDiseaseId,
+  });
 
-  // Build FIPS → case count map for the map component
+  // ── Derived maps ──
   const casesByFips = useMemo<Map<string, number>>(
     () => new Map(summaryRows.map((r) => [r.county_fips, r.total_cases])),
     [summaryRows]
   );
 
-  // Summary stats for the header bar
+  const vaccinationByFips = useMemo<Map<string, number>>(
+    () => new Map(vaccRows.map((r) => [r.county_fips, r.vaccinated_pct])),
+    [vaccRows]
+  );
+
+  // ── Summary stats ──
   const totalCases = useMemo(
     () => summaryRows.reduce((sum, r) => sum + r.total_cases, 0),
     [summaryRows]
@@ -44,11 +72,25 @@ export default function DashboardPage() {
   const countiesWithCases = summaryRows.filter((r) => r.total_cases > 0).length;
   const selectedDisease = diseases.find((d) => d.id === selectedDiseaseId);
 
+  // ── County detail data ──
+  const selectedCountyCases = useMemo(
+    () => summaryRows.find((r) => r.county_fips === selectedCounty?.fips) ?? null,
+    [summaryRows, selectedCounty]
+  );
+  const selectedCountyVacc = useMemo(
+    () => vaccRows.find((r) => r.county_fips === selectedCounty?.fips) ?? null,
+    [vaccRows, selectedCounty]
+  );
+
+  function handleCountyClick(fips: string, name: string) {
+    setSelectedCounty((prev) =>
+      prev?.fips === fips ? null : { fips, name }
+    );
+  }
+
   return (
     <div className="flex min-h-screen flex-col bg-slate-100">
-      {/* ------------------------------------------------------------------ */}
-      {/* Header                                                               */}
-      {/* ------------------------------------------------------------------ */}
+      {/* ── Header ── */}
       <header className="bg-blue-900 px-6 py-4 shadow-md">
         <div className="mx-auto flex max-w-6xl items-center justify-between">
           <div>
@@ -74,9 +116,7 @@ export default function DashboardPage() {
         </div>
       </header>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Main content                                                         */}
-      {/* ------------------------------------------------------------------ */}
+      {/* ── Main content ── */}
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
         {/* Filter bar */}
         <FilterBar
@@ -85,8 +125,10 @@ export default function DashboardPage() {
           dateFrom={dateFrom}
           dateTo={dateTo}
           onDiseaseChange={setSelectedDiseaseId}
-          onDateFromChange={setDateFrom}
-          onDateToChange={setDateTo}
+          onDateChange={(from, to) => {
+            setDateFrom(from);
+            setDateTo(to);
+          }}
         />
 
         {/* Active filter summary */}
@@ -111,14 +153,44 @@ export default function DashboardPage() {
           </p>
         )}
 
-        {/* Map + loading overlay */}
-        <div className="relative mt-4">
-          {summaryLoading && (
-            <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-white/60 backdrop-blur-sm">
-              <span className="text-sm text-slate-500">Updating…</span>
-            </div>
-          )}
-          <FloridaMap casesByFips={casesByFips} />
+        {/* Layer toggle + map */}
+        <div className="mt-4">
+          {/* Toggle */}
+          <div className="mb-2 flex items-center gap-2">
+            {(["cases", "vaccination"] as LayerMode[]).map((mode) => (
+              <button
+                key={mode}
+                onClick={() => setLayerMode(mode)}
+                className={`rounded-full px-4 py-1.5 text-sm font-medium transition-colors ${
+                  layerMode === mode
+                    ? "bg-blue-700 text-white shadow-sm"
+                    : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"
+                }`}
+              >
+                {mode === "cases" ? "Cases" : "Vaccination Rate"}
+              </button>
+            ))}
+            {selectedCounty && (
+              <span className="ml-auto text-sm text-slate-500">
+                Click a county to deselect, or close the panel
+              </span>
+            )}
+          </div>
+
+          {/* Map + loading overlay */}
+          <div className="relative">
+            {summaryLoading && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-white/60 backdrop-blur-sm">
+                <span className="text-sm text-slate-500">Updating…</span>
+              </div>
+            )}
+            <FloridaMap
+              casesByFips={casesByFips}
+              vaccinationByFips={vaccinationByFips}
+              layerMode={layerMode}
+              onCountyClick={handleCountyClick}
+            />
+          </div>
         </div>
 
         {/* County table */}
@@ -137,7 +209,16 @@ export default function DashboardPage() {
                     Total Cases
                   </th>
                   <th className="px-4 py-3 text-right font-medium text-slate-600">
+                    Confirmed
+                  </th>
+                  <th className="px-4 py-3 text-right font-medium text-slate-600">
+                    Probable
+                  </th>
+                  <th className="px-4 py-3 text-right font-medium text-slate-600">
                     Per 100k
+                  </th>
+                  <th className="px-4 py-3 text-right font-medium text-slate-600">
+                    Vacc %
                   </th>
                 </tr>
               </thead>
@@ -154,8 +235,22 @@ export default function DashboardPage() {
                       county?.population && county.population > 0
                         ? ((row.total_cases / county.population) * 100_000).toFixed(1)
                         : "—";
+                    const vacc = vaccRows.find(
+                      (v) => v.county_fips === row.county_fips
+                    );
                     return (
-                      <tr key={row.county_fips} className="hover:bg-slate-50">
+                      <tr
+                        key={row.county_fips}
+                        className={`cursor-pointer hover:bg-slate-50 ${
+                          selectedCounty?.fips === row.county_fips ? "bg-blue-50" : ""
+                        }`}
+                        onClick={() =>
+                          handleCountyClick(
+                            row.county_fips,
+                            county?.name ?? row.county_fips
+                          )
+                        }
+                      >
                         <td className="px-4 py-2 font-medium text-slate-800">
                           {county?.name ?? row.county_fips}
                         </td>
@@ -163,7 +258,20 @@ export default function DashboardPage() {
                           {row.total_cases.toLocaleString()}
                         </td>
                         <td className="px-4 py-2 text-right text-slate-500">
+                          {row.confirmed_total > 0
+                            ? row.confirmed_total.toLocaleString()
+                            : "—"}
+                        </td>
+                        <td className="px-4 py-2 text-right text-slate-500">
+                          {row.probable_total > 0
+                            ? row.probable_total.toLocaleString()
+                            : "—"}
+                        </td>
+                        <td className="px-4 py-2 text-right text-slate-500">
                           {per100k}
+                        </td>
+                        <td className="px-4 py-2 text-right text-slate-500">
+                          {vacc ? `${vacc.vaccinated_pct.toFixed(1)}%` : "—"}
                         </td>
                       </tr>
                     );
@@ -171,7 +279,7 @@ export default function DashboardPage() {
                 {summaryRows.length === 0 && !summaryLoading && (
                   <tr>
                     <td
-                      colSpan={3}
+                      colSpan={6}
                       className="px-4 py-6 text-center text-slate-400"
                     >
                       No case data for the selected filters.
@@ -187,6 +295,21 @@ export default function DashboardPage() {
       <footer className="py-4 text-center text-xs text-slate-400">
         Data: FL Health CHARTS · FL DOH VPD Reports · Local news signals
       </footer>
+
+      {/* County detail panel (slide-out) */}
+      <CountyDetailPanel
+        county={
+          selectedCounty
+            ? (counties.find((c) => c.fips_code === selectedCounty.fips) ?? null)
+            : null
+        }
+        cases={selectedCountyCases}
+        vaccSummary={selectedCountyVacc}
+        vaccByDisease={countyVaccRates}
+        signals={newsSignals}
+        diseases={diseases}
+        onClose={() => setSelectedCounty(null)}
+      />
     </div>
   );
 }
