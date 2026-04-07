@@ -88,8 +88,13 @@ export interface AcquisitionBreakdownRow {
 // Fetch helpers
 // ---------------------------------------------------------------------------
 
+function authHeaders(): HeadersInit {
+  const key = process.env.NEXT_PUBLIC_API_KEY;
+  return key ? { Authorization: `Bearer ${key}` } : {};
+}
+
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`);
+  const res = await fetch(`${API_BASE}${path}`, { headers: authHeaders() });
   if (!res.ok) throw new Error(`GET ${path} → ${res.status}`);
   return res.json() as Promise<T>;
 }

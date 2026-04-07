@@ -19,5 +19,34 @@ services:
       timeout: 5s
       retries: 10
 
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.scraper
+    container_name: fl_outbreak_api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:devpassword@db:5432/fl_outbreak
+      API_KEY: ${API_KEY:-}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["uvicorn", "backend.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+  scraper:
+    build:
+      context: .
+      dockerfile: Dockerfile.scraper
+    container_name: fl_outbreak_scraper
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:devpassword@db:5432/fl_outbreak
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["python", "-m", "backend.scrapers.cron_runner"]
+
 volumes:
   pgdata:

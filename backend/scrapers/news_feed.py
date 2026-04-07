@@ -32,8 +32,8 @@ from sqlalchemy import select
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from backend.models.database import ArticleSignal, AsyncSessionLocal, NewsArticle
-from backend.nlp.classifier import extract_signals
+from backend.models.database import ArticleSignal, AsyncSessionLocal, Disease, NewsArticle
+from backend.nlp.classifier import extract_signals, set_disease_id_cache
 
 log = logging.getLogger(__name__)
 
@@ -58,6 +58,27 @@ FEEDS: list[FeedConfig] = [
     {
         "source": "Tampa Bay Times",
         "url": "https://www.tampabay.com/health/feed/",
+    },
+    # Additional FL-focused sources
+    {
+        "source": "Florida Health News",
+        "url": "https://www.floridahealthnews.com/feed/",
+    },
+    {
+        "source": "Sun Sentinel Health",
+        "url": "https://www.sun-sentinel.com/health/feed/",
+    },
+    {
+        "source": "Jacksonville.com Health",
+        "url": "https://www.jacksonville.com/search/?q=health+disease&t=article&f=rss",
+    },
+    {
+        "source": "Gainesville Sun Health",
+        "url": "https://www.gainesville.com/search/?q=outbreak+disease+vaccine&t=article&f=rss",
+    },
+    {
+        "source": "FL DOH News",
+        "url": "https://www.floridahealth.gov/newsroom/rss/news.rss",
     },
 ]
 
@@ -211,8 +232,18 @@ async def ingest_feed(feed: FeedConfig) -> int:
     return stored
 
 
+async def _load_disease_cache() -> None:
+    """Pre-populate the NLP disease-id cache from the DB."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(Disease))
+        diseases = result.scalars().all()
+    set_disease_id_cache({d.name: d.id for d in diseases})
+    log.info("Disease ID cache loaded: %d entries", len(diseases))
+
+
 async def ingest_all_feeds(feeds: list[FeedConfig] | None = None) -> int:
     """Ingest all configured feeds sequentially. Returns total articles stored."""
+    await _load_disease_cache()
     feeds = feeds or FEEDS
     total = 0
     for feed in feeds:

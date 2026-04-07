@@ -1,6 +1,7 @@
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from backend.api.middleware.auth import require_api_key
 from backend.api.routers import cases, counties, diseases, vaccination_rates, news, alerts
 
 app = FastAPI(
@@ -16,14 +17,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(counties.router)
-app.include_router(diseases.router)
-app.include_router(cases.router)
-app.include_router(vaccination_rates.router)
-app.include_router(news.router)
-app.include_router(alerts.router)
-
-
+# Public endpoints (no auth required)
 @app.get("/")
 async def root():
     return {"status": "ok", "message": "FL Outbreak Tracker API running"}
@@ -32,3 +26,14 @@ async def root():
 @app.get("/health")
 async def health():
     return {"status": "healthy"}
+
+
+# Protected routers — require Bearer token when API_KEY env var is set
+_auth = [Depends(require_api_key)]
+
+app.include_router(counties.router, dependencies=_auth)
+app.include_router(diseases.router, dependencies=_auth)
+app.include_router(cases.router, dependencies=_auth)
+app.include_router(vaccination_rates.router, dependencies=_auth)
+app.include_router(news.router, dependencies=_auth)
+app.include_router(alerts.router, dependencies=_auth)
