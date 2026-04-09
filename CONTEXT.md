@@ -36,18 +36,20 @@ A public health surveillance dashboard for Florida vaccine-preventable diseases 
 
 | Source | What it provides | Status |
 |---|---|---|
-| FL Health CHARTS (`flhealthcharts.gov`) | County-level annual VPD case counts | Scraper built; CHARTS URL has changed — needs endpoint update |
+| FL Health CHARTS (`flhealthcharts.gov`) | County-level annual VPD case counts | ✅ Live — 5,183 real rows (12 diseases × 67 counties, 2015–2024) |
 | FL DOH School Immunization Survey | Annual vaccination/exemption rates by county and facility type | Seeded with synthetic data (3 years: 2022–2024, realistic Gaussian variance); real scraper TBD |
-| Local FL news RSS feeds | Free-text outbreak signals extracted via NLP | Scraper built (8 FL sources); seeded with 20 sample articles |
-| Seed data (synthetic) | Fills gaps while real scrapers are being fixed | 1,507 disease case rows, 2,412 vaccination rate rows, 10 outbreak alerts, 20 article signals |
+| Local FL news RSS feeds | Free-text outbreak signals extracted via NLP | 1 working feed (Florida Health News); 21 articles total (20 seed + 1 live) |
+| Seed data (synthetic) | Fills gaps while real scrapers are being fixed | Vaccination: 2,412 rows (3 years × 67 counties × 12 diseases); alerts: 10; article signals: 20 |
 
 **Note on CHARTS scraper (v2):** The old `Chapt7.T7_2` single-report endpoint is gone. The portal now uses per-disease DataViewer pages keyed by a `cid` parameter. The scraper has been rewritten accordingly:
 - URL: `https://www.flhealthcharts.gov/ChartsReports/rdPage.aspx?rdReport=NonVitalIndNoGrpCounts.DataViewer&cid=<ID>`
 - Disease CIDs: Measles=129, Mumps=155, Rubella=157, Pertussis=156, Varicella=8633, Hepatitis A=154, Hepatitis B=8659, Meningococcal=8662, Haemophilus Influenzae=167, Tetanus=168, Diphtheria=161, Polio=162
-- Strategy: GET page → extract `rdCSRFKey` CSRF token → POST with `county` + `county_year=""` → parse HTML table `dtChartDataGrid_CountsOnly`
-- Data is in the HTML (not AJAX). Table columns: Data Year | County Count | FL Count
+- Strategy: GET page → extract all hidden fields (including `rdCSRFKey`) → POST with `county=<NUM>` (1-67 numeric values) + `county_year=<LATEST>` + all hidden fields → parse `dtChartDataGrid_CountsOnly`
+- One POST per county returns ALL years (~10 years of data); 804 total requests async-batched (concurrency=8)
 - Run `python -m backend.scrapers.fl_charts --dry-run` to verify parsing before a full run
 - Run `python -m backend.scrapers.fl_charts` for a full ingest (12 diseases × 67 counties, async batched)
+
+**Note on news scraper:** `feedparser.parse(url)` has no built-in timeout and hangs indefinitely. Fixed to use `httpx.AsyncClient` with `REQUEST_TIMEOUT=20s` to fetch raw XML, then pass content to `feedparser.parse()`. Most major FL news outlets have dead/403/paywalled RSS feeds as of 2026-04; only `floridahealthnews.com/feed/` is a working real-time source.
 
 **Vaccination data note:** `vaccination_rates` stores one survey per year per county/disease (not monthly). The 3 seeded years (2022, 2023, 2024) are used for the YoY vaccination trend line in the county panel. YoY records are preserved intentionally for trend analytics.
 
@@ -201,9 +203,8 @@ The table below the map includes Confirmed, Probable, Per-100k, Vaccination %, a
 
 | Topic | Notes |
 |---|---|
-| CHARTS scraper — test & tune | Run `--dry-run` to verify HTML parsing and county_name spelling against live portal; adjust if needed |
 | Real vaccination data | Build `backend/scrapers/fl_doh_vacc.py` to pull real FL DOH school immunization exports; replace synthetic seed |
-| News scraper live run | Run `python -m backend.scrapers.news_feed` against live feeds; verify signals stored correctly |
+| More news sources | Most major FL outlets block RSS (403/paywall); find additional working feeds or use a news API (NewsAPI.org, GDELT) |
 | NLP upgrade | Swap the regex classifier in `backend/nlp/classifier.py` for spaCy NER (`en_core_web_sm`) |
 | News deduplication | Contextualise signals against existing records by date window to avoid double-counting the same outbreak |
 

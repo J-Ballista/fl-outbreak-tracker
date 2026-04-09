@@ -47,39 +47,15 @@ class FeedConfig(TypedDict):
 
 
 FEEDS: list[FeedConfig] = [
-    {
-        "source": "Orlando Sentinel",
-        "url": "https://www.orlandosentinel.com/health/feed/",
-    },
-    {
-        "source": "Miami Herald",
-        "url": "https://www.miamiherald.com/news/health-care/rss.xml",
-    },
-    {
-        "source": "Tampa Bay Times",
-        "url": "https://www.tampabay.com/health/feed/",
-    },
-    # Additional FL-focused sources
+    # Verified working feeds (checked 2026-04)
     {
         "source": "Florida Health News",
         "url": "https://www.floridahealthnews.com/feed/",
     },
-    {
-        "source": "Sun Sentinel Health",
-        "url": "https://www.sun-sentinel.com/health/feed/",
-    },
-    {
-        "source": "Jacksonville.com Health",
-        "url": "https://www.jacksonville.com/search/?q=health+disease&t=article&f=rss",
-    },
-    {
-        "source": "Gainesville Sun Health",
-        "url": "https://www.gainesville.com/search/?q=outbreak+disease+vaccine&t=article&f=rss",
-    },
-    {
-        "source": "FL DOH News",
-        "url": "https://www.floridahealth.gov/newsroom/rss/news.rss",
-    },
+    # Dead / broken feeds as of 2026-04:
+    #   Orlando Sentinel (403), Miami Herald (timeout), Tampa Bay Times (404),
+    #   Sun Sentinel (403), FL DOH News RSS (empty), Jacksonville.com (returns HTML),
+    #   Gainesville Sun (returns HTML)
 ]
 
 # Keywords used to pre-filter articles before running expensive NLP.
@@ -102,9 +78,16 @@ REQUEST_TIMEOUT = 20.0
 # Feed parsing helpers
 # ---------------------------------------------------------------------------
 
-def _parse_feed(raw_url: str) -> list[feedparser.FeedParserDict]:
+async def _parse_feed(raw_url: str) -> list[feedparser.FeedParserDict]:
     """Fetch and parse an RSS feed. Returns a list of entry dicts."""
-    parsed = feedparser.parse(raw_url)
+    async with httpx.AsyncClient(
+        headers={"User-Agent": "Mozilla/5.0 (FL-Outbreak-Tracker/2.0; public health research)"},
+        follow_redirects=True,
+    ) as client:
+        resp = await client.get(raw_url, timeout=REQUEST_TIMEOUT)
+        resp.raise_for_status()
+        content = resp.text
+    parsed = feedparser.parse(content)
     if parsed.bozo and not parsed.entries:
         raise ValueError(f"Failed to parse feed {raw_url!r}: {parsed.bozo_exception}")
     return parsed.entries
@@ -177,7 +160,7 @@ async def ingest_feed(feed: FeedConfig) -> int:
     """
     log.info("Fetching feed: %s (%s)", feed["source"], feed["url"])
     try:
-        entries = _parse_feed(feed["url"])
+        entries = await _parse_feed(feed["url"])
     except Exception as exc:
         log.error("Feed error [%s]: %s", feed["source"], exc)
         return 0
