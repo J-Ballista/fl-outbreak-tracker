@@ -41,7 +41,13 @@ A public health surveillance dashboard for Florida vaccine-preventable diseases 
 | Local FL news RSS feeds | Free-text outbreak signals extracted via NLP | Scraper built (8 FL sources); seeded with 20 sample articles |
 | Seed data (synthetic) | Fills gaps while real scrapers are being fixed | 1,507 disease case rows, 2,412 vaccination rate rows, 10 outbreak alerts, 20 article signals |
 
-**Note on CHARTS scraper:** The report path `Chapt7.T7_2` now redirects to an AppError page — the FL CHARTS portal has changed its URL scheme. The scraper logic and CSV parsing are correct; only the endpoint URL needs updating once the new path is found on the CHARTS site.
+**Note on CHARTS scraper (v2):** The old `Chapt7.T7_2` single-report endpoint is gone. The portal now uses per-disease DataViewer pages keyed by a `cid` parameter. The scraper has been rewritten accordingly:
+- URL: `https://www.flhealthcharts.gov/ChartsReports/rdPage.aspx?rdReport=NonVitalIndNoGrpCounts.DataViewer&cid=<ID>`
+- Disease CIDs: Measles=129, Mumps=155, Rubella=157, Pertussis=156, Varicella=8633, Hepatitis A=154, Hepatitis B=8659, Meningococcal=8662, Haemophilus Influenzae=167, Tetanus=168, Diphtheria=161, Polio=162
+- Strategy: GET page → extract `rdCSRFKey` CSRF token → POST with `county` + `county_year=""` → parse HTML table `dtChartDataGrid_CountsOnly`
+- Data is in the HTML (not AJAX). Table columns: Data Year | County Count | FL Count
+- Run `python -m backend.scrapers.fl_charts --dry-run` to verify parsing before a full run
+- Run `python -m backend.scrapers.fl_charts` for a full ingest (12 diseases × 67 counties, async batched)
 
 **Vaccination data note:** `vaccination_rates` stores one survey per year per county/disease (not monthly). The 3 seeded years (2022, 2023, 2024) are used for the YoY vaccination trend line in the county panel. YoY records are preserved intentionally for trend analytics.
 
@@ -195,7 +201,7 @@ The table below the map includes Confirmed, Probable, Per-100k, Vaccination %, a
 
 | Topic | Notes |
 |---|---|
-| CHARTS scraper fix | Find the updated report URL on `flhealthcharts.gov` and update `CHARTS_REPORT_PARAMS` in `backend/scrapers/fl_charts.py` |
+| CHARTS scraper — test & tune | Run `--dry-run` to verify HTML parsing and county_name spelling against live portal; adjust if needed |
 | Real vaccination data | Build `backend/scrapers/fl_doh_vacc.py` to pull real FL DOH school immunization exports; replace synthetic seed |
 | News scraper live run | Run `python -m backend.scrapers.news_feed` against live feeds; verify signals stored correctly |
 | NLP upgrade | Swap the regex classifier in `backend/nlp/classifier.py` for spaCy NER (`en_core_web_sm`) |
