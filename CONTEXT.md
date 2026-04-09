@@ -37,9 +37,9 @@ A public health surveillance dashboard for Florida vaccine-preventable diseases 
 | Source | What it provides | Status |
 |---|---|---|
 | FL Health CHARTS (`flhealthcharts.gov`) | County-level annual VPD case counts | ✅ Live — 5,183 real rows (12 diseases × 67 counties, 2015–2024) |
-| FL DOH School Immunization Survey | Annual vaccination/exemption rates by county and facility type | Seeded with synthetic data (3 years: 2022–2024, realistic Gaussian variance); real scraper TBD |
-| Local FL news RSS feeds | Free-text outbreak signals extracted via NLP | 1 working feed (Florida Health News); 21 articles total (20 seed + 1 live) |
-| Seed data (synthetic) | Fills gaps while real scrapers are being fixed | Vaccination: 2,412 rows (3 years × 67 counties × 12 diseases); alerts: 10; article signals: 20 |
+| FL DOH Religious Exemptions (ArcGIS) | County-level religious exemption rates (ages 4–18) aggregated from census tracts via FL SHOTS | ✅ Live — 804 rows (2026, 67 counties × 12 diseases); updated monthly via ArcGIS REST API |
+| Local FL news RSS feeds | Free-text outbreak signals extracted via NLP | 1 working RSS feed (Florida Health News) + GDELT Doc 2.0 API (250 articles/query, no auth) |
+| Seed data (synthetic) | Fills gaps for years 2022–2024 | Vaccination: 2,412 rows (3 years × 67 counties × 12 diseases); alerts: 10; article signals: 20 |
 
 **Note on CHARTS scraper (v2):** The old `Chapt7.T7_2` single-report endpoint is gone. The portal now uses per-disease DataViewer pages keyed by a `cid` parameter. The scraper has been rewritten accordingly:
 - URL: `https://www.flhealthcharts.gov/ChartsReports/rdPage.aspx?rdReport=NonVitalIndNoGrpCounts.DataViewer&cid=<ID>`
@@ -50,6 +50,10 @@ A public health surveillance dashboard for Florida vaccine-preventable diseases 
 - Run `python -m backend.scrapers.fl_charts` for a full ingest (12 diseases × 67 counties, async batched)
 
 **Note on news scraper:** `feedparser.parse(url)` has no built-in timeout and hangs indefinitely. Fixed to use `httpx.AsyncClient` with `REQUEST_TIMEOUT=20s` to fetch raw XML, then pass content to `feedparser.parse()`. Most major FL news outlets have dead/403/paywalled RSS feeds as of 2026-04; only `floridahealthnews.com/feed/` is a working real-time source.
+
+**GDELT Doc 2.0 integration:** Free REST API, no auth required. Queried via `https://api.gdeltproject.org/api/v2/doc/doc` with FL disease keywords. Returns up to 250 articles per query; article bodies fetched via httpx + BeautifulSoup same as RSS pipeline. Rate limiting can occur under heavy use — scraper retries 3× with 30s backoff. Called from `ingest_all_feeds()` after RSS ingestion.
+
+**FL DOH religious exemption scraper (`fl_doh_exemptions.py`):** Queries the FL DOH ArcGIS service `UpdateThisMapNew` (sourced from Florida SHOTS registry, updated monthly) for all 67 county layers (layer IDs 0–66). Each layer returns census-tract-level data: `TotalPop4_18`, `Exempt` (string — numeric counts or `"<5"` for suppressed cells). Aggregates tracts to county level, derives `vaccinated_pct = 100 - exempt_pct`, stores as `VaccinationRate` rows with `facility_type="school_religious_exemption"` and `survey_year=<current year>`. Upserts on each run. Cron: monthly (1st at 04:00).
 
 **Vaccination data note:** `vaccination_rates` stores one survey per year per county/disease (not monthly). The 3 seeded years (2022, 2023, 2024) are used for the YoY vaccination trend line in the county panel. YoY records are preserved intentionally for trend analytics.
 
@@ -203,8 +207,7 @@ The table below the map includes Confirmed, Probable, Per-100k, Vaccination %, a
 
 | Topic | Notes |
 |---|---|
-| Real vaccination data | Build `backend/scrapers/fl_doh_vacc.py` to pull real FL DOH school immunization exports; replace synthetic seed |
-| More news sources | Most major FL outlets block RSS (403/paywall); find additional working feeds or use a news API (NewsAPI.org, GDELT) |
+| Real vaccination data | FL DOH county-level disease-specific vaccination rates are not publicly accessible (behind FL SHOTS registry). Current best: religious exemption rates from ArcGIS (real, county-level, monthly) + 2022–2024 synthetic seed |
 | NLP upgrade | Swap the regex classifier in `backend/nlp/classifier.py` for spaCy NER (`en_core_web_sm`) |
 | News deduplication | Contextualise signals against existing records by date window to avoid double-counting the same outbreak |
 

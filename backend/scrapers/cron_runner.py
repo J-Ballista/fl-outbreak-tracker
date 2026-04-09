@@ -24,6 +24,7 @@ from datetime import date
 import schedule
 
 from backend.models.database import AsyncSessionLocal
+from backend.scrapers.fl_doh_exemptions import ingest_exemptions
 from backend.scrapers.news_feed import ingest_all_feeds
 from backend.services.alert_engine import generate_alerts
 
@@ -65,7 +66,12 @@ def job_charts_scraper() -> None:
 
 
 def job_vacc_scraper() -> None:
-    log.info("[cron] Vaccination scraper not yet implemented — skipping")
+    log.info("[cron] Running FL DOH exemption scraper")
+    try:
+        count = asyncio.run(ingest_exemptions())
+        log.info("[cron] Exemption scraper complete — %d rows inserted", count)
+    except Exception:
+        log.exception("[cron] Exemption scraper failed")
 
 
 # ---------------------------------------------------------------------------
@@ -84,10 +90,10 @@ def setup_schedule() -> None:
 
     log.info(
         "[cron] Schedule registered:\n"
-        "  02:00 daily   → news RSS ingest\n"
+        "  02:00 daily   → news RSS + GDELT ingest\n"
         "  02:30 daily   → alert engine\n"
         "  03:00 Sunday  → CHARTS scraper (stub)\n"
-        "  04:00 monthly → vaccination scraper (stub)"
+        "  04:00 monthly → FL DOH exemption scraper"
     )
 
 

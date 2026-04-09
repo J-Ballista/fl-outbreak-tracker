@@ -1,14 +1,13 @@
 """
-RSS news feed scraper
-=====================
+RSS news feed scraper + GDELT ingestion
+========================================
 Ingests articles from Florida local news outlets, stores raw text in
 news_articles, then calls the NLP classifier to extract disease/county signals
 and writes them to article_signals.
 
-Configured feeds (extend FEEDS to add more sources):
-  - Orlando Sentinel  — Health section
-  - Miami Herald      — Health section
-  - Tampa Bay Times   — Health section
+Sources:
+  - RSS: Florida Health News (verified working 2026-04)
+  - GDELT Doc 2.0 API: free, no auth, searches English articles by keyword
 
 Run standalone:
     python -m backend.scrapers.news_feed
@@ -21,7 +20,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TypedDict
 
@@ -215,6 +214,137 @@ async def ingest_feed(feed: FeedConfig) -> int:
     return stored
 
 
+# ---------------------------------------------------------------------------
+# GDELT Doc 2.0 ingestion
+# ---------------------------------------------------------------------------
+
+GDELT_API = "https://api.gdeltproject.org/api/v2/doc/doc"
+
+# Search terms: any disease keyword near Florida context
+GDELT_QUERY = (
+    "(measles OR mumps OR rubella OR pertussis OR \"whooping cough\" "
+    "OR varicella OR chickenpox OR hepatitis OR meningococcal OR meningitis "
+    "OR \"vaccine-preventable\") Florida"
+)
+
+# How far back to look on each run (days)
+GDELT_LOOKBACK_DAYS = 7
+
+
+async def ingest_gdelt(lookback_days: int = GDELT_LOOKBACK_DAYS) -> int:
+    """
+    Query the GDELT Doc 2.0 API for recent FL disease news, store new articles.
+    Returns count of new articles stored.
+    """
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(days=lookback_days)
+
+    params = {
+        "query": GDELT_QUERY,
+        "mode": "artlist",
+        "maxrecords": "250",
+        "sourcelang": "english",
+        "startdatetime": start.strftime("%Y%m%d%H%M%S"),
+        "enddatetime": now.strftime("%Y%m%d%H%M%S"),
+        "format": "json",
+    }
+
+    log.info("Querying GDELT: lookback=%dd, from %s", lookback_days, start.date())
+    data: dict = {}
+    for attempt in range(3):
+        try:
+            async with httpx.AsyncClient(
+                headers={"User-Agent": "Mozilla/5.0 (FL-Outbreak-Tracker/2.0; public health research)"},
+                follow_redirects=True,
+            ) as client:
+                resp = await client.get(GDELT_API, params=params, timeout=REQUEST_TIMEOUT)
+                if resp.status_code == 429:
+                    wait = 30 * (attempt + 1)
+                    log.warning("GDELT rate limited — waiting %ds (attempt %d/3)", wait, attempt + 1)
+                    await asyncio.sleep(wait)
+                    continue
+                resp.raise_for_status()
+                data = resp.json()
+                break
+        except Exception as exc:
+            log.error("GDELT API error (attempt %d/3): %s", attempt + 1, exc)
+            if attempt < 2:
+                await asyncio.sleep(15)
+    if not data:
+        return 0
+
+    articles = data.get("articles", [])
+    log.info("GDELT returned %d articles", len(articles))
+
+    stored = 0
+    async with httpx.AsyncClient(
+        headers={"User-Agent": "Mozilla/5.0 (FL-Outbreak-Tracker/2.0; public health research)"},
+        follow_redirects=True,
+    ) as client:
+        async with AsyncSessionLocal() as session:
+            for art in articles:
+                url = art.get("url")
+                if not url:
+                    continue
+
+                if await _article_exists(session, url):
+                    log.debug("Already stored: %s", url)
+                    continue
+
+                # Parse GDELT date: "20260408T123456Z"
+                published_at: datetime | None = None
+                seen = art.get("seendate", "")
+                try:
+                    published_at = datetime.strptime(seen, "%Y%m%dT%H%M%SZ").replace(
+                        tzinfo=timezone.utc
+                    )
+                except ValueError:
+                    pass
+
+                body = await _fetch_body(client, url)
+
+                title = art.get("title", "")
+                source_name = art.get("domain", "GDELT")
+
+                # Pre-filter: skip if body + title have no relevance keywords
+                combined = f"{title} {body}".lower()
+                if not any(kw in combined for kw in RELEVANCE_KEYWORDS):
+                    log.debug("Skipping irrelevant GDELT article: %s", url)
+                    continue
+
+                article = NewsArticle(
+                    url=url,
+                    title=title,
+                    source=source_name,
+                    published_at=published_at,
+                    body_text=body,
+                )
+                session.add(article)
+                await session.flush()
+
+                text_for_nlp = f"{title} {body}"
+                signals = extract_signals(text_for_nlp)
+
+                for sig in signals:
+                    session.add(
+                        ArticleSignal(
+                            article_id=article.id,
+                            county_fips=sig.get("county_fips"),
+                            disease_id=sig.get("disease_id"),
+                            extracted_case_count=sig.get("case_count"),
+                            confidence=sig.get("confidence"),
+                            extraction_notes=sig.get("notes"),
+                        )
+                    )
+
+                await session.commit()
+                stored += 1
+                log.info("Stored GDELT: [%s] %s", source_name, url)
+
+    log.info("GDELT ingestion complete — %d new articles stored.", stored)
+    return stored
+
+
 async def _load_disease_cache() -> None:
     """Pre-populate the NLP disease-id cache from the DB."""
     async with AsyncSessionLocal() as session:
@@ -225,13 +355,14 @@ async def _load_disease_cache() -> None:
 
 
 async def ingest_all_feeds(feeds: list[FeedConfig] | None = None) -> int:
-    """Ingest all configured feeds sequentially. Returns total articles stored."""
+    """Ingest all configured feeds + GDELT. Returns total articles stored."""
     await _load_disease_cache()
     feeds = feeds or FEEDS
     total = 0
     for feed in feeds:
         total += await ingest_feed(feed)
-    log.info("RSS ingestion complete — %d new articles stored.", total)
+    total += await ingest_gdelt()
+    log.info("Full ingestion complete — %d new articles stored.", total)
     return total
 
 
