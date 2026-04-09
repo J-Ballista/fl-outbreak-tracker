@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import FilterBar from "@/app/components/FilterBar";
 import CountyDetailPanel from "@/app/components/CountyDetailPanel";
 import {
@@ -126,6 +127,7 @@ export default function DashboardPage() {
   );
   const countiesWithCases = summaryRows.filter((r) => r.total_cases > 0).length;
   const selectedDisease = diseases.find((d) => d.id === selectedDiseaseId);
+  const herdThreshold = selectedDisease?.herd_threshold_pct ?? 90;
 
   // ── County detail data ──
   const selectedCountyCases = useMemo(
@@ -155,6 +157,12 @@ export default function DashboardPage() {
             </p>
           </div>
           <div className="flex items-center gap-6 text-right">
+            <Link
+              href="/analytics"
+              className="rounded-full bg-blue-700 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-600"
+            >
+              Analytics
+            </Link>
             <div>
               <p className="text-2xl font-bold text-white">
                 {totalCases.toLocaleString()}
@@ -252,6 +260,7 @@ export default function DashboardPage() {
               vaccinationByFips={vaccinationByFips}
               alertsByFips={alertsByFips}
               layerMode={layerMode}
+              herdThreshold={herdThreshold}
               onCountyClick={handleCountyClick}
             />
           </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import "./MonthRangeSlider.css";
 
 interface MonthRangeSliderProps {
   dateFrom: string;   // ISO date string "YYYY-MM-DD" or ""
@@ -67,8 +68,29 @@ export default function MonthRangeSlider({
     );
   }
 
+  const fromPct = useMemo(
+    () => (fromIdx / (months.length - 1)) * 100,
+    [fromIdx, months.length]
+  );
+  const toPct = useMemo(
+    () => (toIdx / (months.length - 1)) * 100,
+    [toIdx, months.length]
+  );
+
+  const trackBg = `linear-gradient(to right,
+    #e2e8f0 0%,
+    #e2e8f0 ${fromPct}%,
+    #3b82f6 ${fromPct}%,
+    #3b82f6 ${toPct}%,
+    #e2e8f0 ${toPct}%,
+    #e2e8f0 100%)`;
+
+  // Raise from-thumb z-index when it's pushed to the far right
+  // so the user can still drag it leftward
+  const fromZIndex = fromIdx >= months.length - 2 ? 3 : 1;
+
   return (
-    <div className="flex flex-col gap-1 min-w-[260px]">
+    <div className="flex flex-col gap-2 min-w-[260px]">
       <div className="flex items-center justify-between text-xs font-medium text-slate-600">
         <span>Date range</span>
         <span className="text-slate-500">
@@ -76,29 +98,32 @@ export default function MonthRangeSlider({
         </span>
       </div>
 
-      {/* From slider */}
-      <div className="relative flex items-center gap-2">
-        <span className="w-12 shrink-0 text-xs text-slate-400 text-right">From</span>
+      {/* Single merged range track */}
+      <div className="relative h-5 w-full">
+        {/* Visual track */}
+        <div
+          className="pointer-events-none absolute top-1/2 h-2 w-full -translate-y-1/2 rounded-full"
+          style={{ background: trackBg }}
+        />
+        {/* From thumb */}
         <input
           type="range"
           min={0}
           max={months.length - 1}
           value={fromIdx}
           onChange={handleFrom}
-          className="w-full h-1.5 accent-blue-600 cursor-pointer"
+          className="month-range-input absolute inset-0 h-full w-full"
+          style={{ zIndex: fromZIndex }}
         />
-      </div>
-
-      {/* To slider */}
-      <div className="relative flex items-center gap-2">
-        <span className="w-12 shrink-0 text-xs text-slate-400 text-right">To</span>
+        {/* To thumb */}
         <input
           type="range"
           min={0}
           max={months.length - 1}
           value={toIdx}
           onChange={handleTo}
-          className="w-full h-1.5 accent-blue-600 cursor-pointer"
+          className="month-range-input absolute inset-0 h-full w-full"
+          style={{ zIndex: 2 }}
         />
       </div>
     </div>

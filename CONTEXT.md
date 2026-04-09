@@ -98,18 +98,29 @@ app/
   login/page.tsx            Password gate page (blue-900 header, centered form)
   api/login/route.ts        POST: validates password, sets httpOnly session cookie
   middleware.ts             Redirects unauthenticated requests to /login
+  analytics/
+    page.tsx                Analytics route — disease/county selectors + AnalyticsChart
   components/
     FilterBar.tsx            Disease dropdown + MonthRangeSlider
-    MonthRangeSlider.tsx     Dual-thumb slider over 24 rolling months
+    MonthRangeSlider.tsx     Single merged range track with two overlaid thumbs (CSS:
+                               MonthRangeSlider.css); pointer-events: none on inputs,
+                               auto on thumb pseudo-elements
     FloridaMap.tsx           D3 SVG choropleth — Cases / Vaccination Rate toggle
                                + alert ring overlays (watch/warning/emergency)
-    CountyDetailPanel.tsx    Slide-out panel: Active Alerts, Cases KPIs, trend chart,
-                               age breakdown bars, acquisition pills, vacc table, news links
+                               Vaccination layer uses d3.scaleDiverging pivoting at
+                               herd_threshold_pct (red→amber→green)
+    CountyDetailPanel.tsx    Slide-out panel: Active Alerts, Cases KPIs (with YoY Δ%
+                               badge), trend chart, age breakdown bars, acquisition pills,
+                               vacc table (with YoY Δ% badge), news links
     TrendSparkline.tsx       Dual-axis D3 chart: red case trend (left) + green vacc YoY
                                trend (right) + amber herd threshold dotted line; hover
                                tooltips on both lines; last month always pinned on X axis
+    AnalyticsChart.tsx       Full-width D3 chart for /analytics: cases line + vacc dots
+                               + herd threshold dotted line; dual-axis; hover crosshair;
+                               responsive via viewBox="0 0 800 400" width="100%"
     Tooltip.tsx              Hover tooltip (cases or vacc % depending on layer mode)
-    Legend.tsx               Colour scale legend with dynamic label
+    Legend.tsx               Colour scale legend with dynamic label + optional amber
+                               "Herd" tick marker (vaccination layer only)
   hooks/
     useMapData.ts            SWR hooks: useCounties, useDiseases, useCasesSummary,
                                useVaccinationSummary, useCountyVaccRates, useCountyVaccTrend,
@@ -175,6 +186,10 @@ The table below the map includes Confirmed, Probable, Per-100k, Vaccination %, a
 | News scraper — disease ID cache loaded at startup | ✅ Done |
 | Docker cron service (cron_runner.py + Dockerfile.scraper) | ✅ Done |
 | requirements.txt for reproducible Docker builds | ✅ Done |
+| Herd-immunity diverging colour scale on vaccination map layer | ✅ Done |
+| Month range slider — single track with two overlaid thumbs | ✅ Done |
+| County panel — YoY Δ% badges (vaccination rate + case count) | ✅ Done |
+| Analytics / BI chart view (`/analytics` route) | ✅ Done |
 
 ## Known Gaps / Future Ideas
 
@@ -184,12 +199,7 @@ The table below the map includes Confirmed, Probable, Per-100k, Vaccination %, a
 | Real vaccination data | Build `backend/scrapers/fl_doh_vacc.py` to pull real FL DOH school immunization exports; replace synthetic seed |
 | News scraper live run | Run `python -m backend.scrapers.news_feed` against live feeds; verify signals stored correctly |
 | NLP upgrade | Swap the regex classifier in `backend/nlp/classifier.py` for spaCy NER (`en_core_web_sm`) |
-| Herd-immunity colour scale | Vaccination map layer should colour counties relative to herd threshold — pivot at `disease.herd_threshold_pct` |
 | News deduplication | Contextualise signals against existing records by date window to avoid double-counting the same outbreak |
-| Month slider UX | Replace two separate From/To sliders with a single range bar with two draggable endpoints |
-| County panel — YoY analytics | Add YoY Δ% for vacc rate and confirmed case count (compare latest vs. prior year in DB) |
-| Analytics / BI chart view | Second view: time-series chart per disease/county with herd immunity benchmark line |
-| spaCy NLP upgrade | See plan doc — keep `extract_signals()` interface, swap internals |
 
 ---
 

@@ -1,0 +1,58 @@
+/* Month range slider — transparent track, styled thumb only */
+.month-range-input {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  pointer-events: none;
+  outline: none;
+}
+
+/* WebKit — hide the native track completely */
+.month-range-input::-webkit-slider-runnable-track {
+  background: transparent;
+  height: 0;
+  border: none;
+}
+
+/* WebKit thumb */
+.month-range-input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  pointer-events: auto;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #3b82f6;
+  border: 2px solid #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  /* vertically centre thumb over the h-2 visual track */
+  margin-top: -9px;
+}
+
+.month-range-input::-webkit-slider-thumb:hover {
+  background: #2563eb;
+}
+
+/* Firefox — hide the native track completely */
+.month-range-input::-moz-range-track {
+  background: transparent;
+  height: 0;
+  border: none;
+}
+
+/* Firefox thumb */
+.month-range-input::-moz-range-thumb {
+  pointer-events: auto;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #3b82f6;
+  border: 2px solid #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+}
+
+.month-range-input::-moz-range-thumb:hover {
+  background: #2563eb;
+}

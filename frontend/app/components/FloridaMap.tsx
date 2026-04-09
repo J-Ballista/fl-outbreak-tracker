@@ -35,6 +35,7 @@ interface FloridaMapProps {
   vaccinationByFips: Map<string, number>;
   alertsByFips: Map<string, AlertSeverity>;
   layerMode: LayerMode;
+  herdThreshold?: number;
   onCountyClick: (fips: string, name: string) => void;
 }
 
@@ -63,6 +64,7 @@ export default function FloridaMap({
   vaccinationByFips,
   alertsByFips,
   layerMode,
+  herdThreshold = 90,
   onCountyClick,
 }: FloridaMapProps) {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -72,6 +74,7 @@ export default function FloridaMap({
     () => () => "#e2e8f0"
   );
   const [domain, setDomain] = useState<[number, number]>([0, 1]);
+  const [thresholdPct, setThresholdPct] = useState<number>(90);
 
   // ------------------------------------------------------------------
   // Load GeoJSON once
@@ -103,11 +106,18 @@ export default function FloridaMap({
   useEffect(() => {
     if (layerMode === "vaccination") {
       const values = Array.from(vaccinationByFips.values());
-      const min = values.length ? Math.min(...values) : 0;
-      const max = values.length ? Math.max(...values) : 100;
-      const scale = d3.scaleSequential(d3.interpolateGreens).domain([min, max]);
+      const dataMin = values.length ? Math.min(...values) : 0;
+      const dataMax = values.length ? Math.max(...values) : 100;
+      // Guard against domain collapse — ensure threshold is always within [lo, hi]
+      const lo = Math.min(dataMin, herdThreshold - 1);
+      const hi = Math.max(dataMax, herdThreshold + 1);
+      const scale = d3
+        .scaleDiverging(d3.interpolateRgbBasis(["#dc2626", "#f59e0b", "#15803d"]))
+        .domain([lo, herdThreshold, hi])
+        .clamp(true);
       setColorScale(() => (v: number) => scale(v));
-      setDomain([min, max]);
+      setDomain([lo, hi]);
+      setThresholdPct(herdThreshold);
     } else {
       const values = Array.from(casesByFips.values());
       const max = values.length ? Math.max(...values) : 1;
@@ -115,7 +125,7 @@ export default function FloridaMap({
       setColorScale(() => (v: number) => scale(v));
       setDomain([0, max]);
     }
-  }, [casesByFips, vaccinationByFips, layerMode]);
+  }, [casesByFips, vaccinationByFips, layerMode, herdThreshold]);
 
   // ------------------------------------------------------------------
   // Render / re-render map
@@ -218,8 +228,13 @@ export default function FloridaMap({
           vaccPct={layerMode === "vaccination" ? tooltip.value : null}
         />
       )}
-      <div className="mt-2 flex justify-end">
-        <Legend colorScale={colorScale} domain={domain} label={legendLabel} />
+      <div className="mt-4 flex justify-end">
+        <Legend
+          colorScale={colorScale}
+          domain={domain}
+          label={legendLabel}
+          thresholdPct={layerMode === "vaccination" ? thresholdPct : undefined}
+        />
       </div>
       {/* Alert legend */}
       {alertsByFips.size > 0 && (

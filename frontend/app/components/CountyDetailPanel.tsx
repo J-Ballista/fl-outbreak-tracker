@@ -48,6 +48,22 @@ function SeverityBadge({ severity }: { severity: string }) {
   );
 }
 
+function YoYBadge({ delta, invert = false }: { delta: number | null; invert?: boolean }) {
+  if (delta === null) return <span className="text-xs text-slate-400">–</span>;
+  const positive = delta >= 0;
+  const isGood = invert ? !positive : positive;
+  const sign = positive ? "↑" : "↓";
+  return (
+    <span
+      className={`ml-2 rounded-full px-2 py-0.5 text-xs font-semibold ${
+        isGood ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+      }`}
+    >
+      {sign}{Math.abs(delta).toFixed(1)}%
+    </span>
+  );
+}
+
 function ConfidenceBadge({ value }: { value: number | null }) {
   if (value === null) return null;
   const pct = Math.round((value ?? 0) * 100);
@@ -101,6 +117,32 @@ export default function CountyDetailPanel({
       .filter((t): t is number => t != null);
     if (thresholds.length === 0) return null;
     return thresholds.reduce((a, b) => a + b, 0) / thresholds.length;
+  })();
+
+  // YoY vaccination rate delta (latest survey year vs prior year)
+  const vaccYoY: number | null = (() => {
+    if (vaccTrend.length < 2) return null;
+    const sorted = [...vaccTrend].sort((a, b) => a.survey_year - b.survey_year);
+    const latest = sorted[sorted.length - 1].vaccinated_pct;
+    const prior = sorted[sorted.length - 2].vaccinated_pct;
+    if (prior === 0) return null;
+    return ((latest - prior) / prior) * 100;
+  })();
+
+  // YoY case count delta (group monthly trend by calendar year)
+  const caseYoY: number | null = (() => {
+    if (trend.length === 0) return null;
+    const byYear = new Map<number, number>();
+    for (const pt of trend) {
+      const year = new Date(pt.report_date).getFullYear();
+      byYear.set(year, (byYear.get(year) ?? 0) + pt.total_cases);
+    }
+    const years = [...byYear.keys()].sort((a, b) => a - b);
+    if (years.length < 2) return null;
+    const latest = byYear.get(years[years.length - 1])!;
+    const prior = byYear.get(years[years.length - 2])!;
+    if (prior === 0) return null;
+    return ((latest - prior) / prior) * 100;
   })();
 
   return (
@@ -179,8 +221,17 @@ export default function CountyDetailPanel({
               Cases (selected period)
             </h3>
             <div className="grid grid-cols-3 gap-2">
+              {/* Total — with YoY badge */}
+              <div className="rounded-lg bg-slate-50 p-3 text-center ring-1 ring-slate-200">
+                <p className="text-xl font-bold text-slate-800">
+                  {(cases?.total_cases ?? 0).toLocaleString()}
+                </p>
+                <p className="mt-0.5 text-xs text-slate-500 flex items-center justify-center flex-wrap gap-0.5">
+                  Total
+                  <YoYBadge delta={caseYoY} invert />
+                </p>
+              </div>
               {[
-                { label: "Total", value: cases?.total_cases ?? 0 },
                 { label: "Confirmed", value: cases?.confirmed_total ?? 0 },
                 { label: "Probable", value: cases?.probable_total ?? 0 },
               ].map(({ label, value }) => (
@@ -289,8 +340,9 @@ export default function CountyDetailPanel({
 
               <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200 mb-3">
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-sm font-medium text-slate-700">
+                  <span className="text-sm font-medium text-slate-700 flex items-center flex-wrap gap-1">
                     {vaccSummary.vaccinated_pct.toFixed(1)}% avg across diseases
+                    <YoYBadge delta={vaccYoY} />
                   </span>
                 </div>
                 <div className="h-2 w-full rounded-full bg-slate-200 overflow-hidden">
