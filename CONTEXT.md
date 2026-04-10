@@ -202,14 +202,14 @@ The table below the map includes Confirmed, Probable, Per-100k, Vaccination %, a
 | Month range slider — single track with two overlaid thumbs | ✅ Done |
 | County panel — YoY Δ% badges (vaccination rate + case count) | ✅ Done |
 | Analytics / BI chart view (`/analytics` route) | ✅ Done |
+| NLP upgrade — spaCy en_core_web_sm GPE NER + PhraseMatcher for disease keywords | ✅ Done |
+| News signal deduplication — 14-day window grouping, is_duplicate column, API filter | ✅ Done |
 
 ## Known Gaps / Future Ideas
 
 | Topic | Notes |
 |---|---|
-| Real vaccination data | FL DOH county-level disease-specific vaccination rates are not publicly accessible (behind FL SHOTS registry). Current best: religious exemption rates from ArcGIS (real, county-level, monthly) + 2022–2024 synthetic seed |
-| NLP upgrade | Swap the regex classifier in `backend/nlp/classifier.py` for spaCy NER (`en_core_web_sm`) |
-| News deduplication | Contextualise signals against existing records by date window to avoid double-counting the same outbreak |
+| Real vaccination data | FL DOH county-level disease-specific vaccination rates are not publicly accessible (behind FL SHOTS registry). No public county-level API exists in CDC NIS, CDC SchoolVaxView, or WONDER either. Current best: religious exemption rates from ArcGIS (real, county-level, monthly) + 2022–2024 synthetic seed. Possible future: parse CDC SchoolVaxView annual FL PDF/Excel report for school-district-level data, or add CDC state-level NIS average as a chart benchmark. |
 
 ---
 
@@ -234,6 +234,8 @@ python scripts/seed_vaccination_rates.py   # 2022–2024, 67 counties, 12 diseas
 python scripts/seed_article_signals.py
 python scripts/seed_alerts.py              # 10 alerts (watch/warning/emergency)
 ```
+
+**spaCy model:** The NLP classifier requires `en_core_web_sm`. Install once: `python -m spacy download en_core_web_sm`. The Docker scraper image downloads it automatically at build time.
 
 **GitHub auth:** Uses `gh` CLI (`gh auth login` — browser OAuth). `git push origin main` works after that. Remote: `https://github.com/J-Ballista/fl-outbreak-tracker.git`.
 
