@@ -7,6 +7,7 @@ from typing import Optional
 
 from dotenv import load_dotenv
 from sqlalchemy import (
+    Boolean,
     Date,
     DateTime,
     Float,
@@ -208,6 +209,7 @@ class ArticleSignal(Base):
     extracted_case_count: Mapped[Optional[int]] = mapped_column(Integer)
     confidence: Mapped[Optional[float]] = mapped_column(Float)           # 0.0–1.0 NLP confidence
     extraction_notes: Mapped[Optional[str]] = mapped_column(Text)
+    is_duplicate: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

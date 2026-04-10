@@ -4,12 +4,16 @@ NLP signal extractor
 Extracts disease names, Florida county names, and case counts from free text
 (news article titles + bodies).
 
-Currently uses a fast regex/keyword approach as a baseline.
-Swap ``extract_signals`` with a model-based implementation when ready
-(spaCy NER, fine-tuned BERT, etc.) — the interface stays the same.
+Uses spaCy en_core_web_sm for:
+  - GPE (geo-political entity) recognition → county / city resolution
+  - PhraseMatcher for disease keyword matching (more robust than naive substring)
+
+Regex is kept for case count extraction (spaCy doesn't model numeric patterns
+like "17 cases" reliably).
 
 Return value of extract_signals():
-    List of dicts, each with optional keys:
+    List of dicts, may be empty if nothing relevant found.
+    Each dict has:
         county_fips   : str | None
         disease_id    : int | None   (resolved against DISEASE_ID_MAP)
         case_count    : int | None
@@ -20,6 +24,10 @@ Return value of extract_signals():
 from __future__ import annotations
 
 import re
+from functools import lru_cache
+
+import spacy
+from spacy.matcher import PhraseMatcher
 
 # ---------------------------------------------------------------------------
 # Static reference tables
@@ -98,11 +106,28 @@ def set_disease_id_cache(mapping: dict[str, int]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Regex patterns
+# spaCy model + PhraseMatcher (lazy-loaded once per process)
 # ---------------------------------------------------------------------------
 
-# Matches "17 cases", "17 new measles cases", "three new cases", etc.
-# The .{0,30}? allows intervening words like disease names.
+@lru_cache(maxsize=1)
+def _get_nlp():
+    """Load spaCy model and build PhraseMatcher. Cached after first call."""
+    nlp = spacy.load("en_core_web_sm", disable=["parser", "ner"])
+
+    # Re-enable only the NER component for GPE detection
+    nlp.enable_pipe("ner")
+
+    matcher = PhraseMatcher(nlp.vocab, attr="LOWER")
+    patterns = [nlp.make_doc(kw) for kw in DISEASE_KEYWORD_MAP]
+    matcher.add("DISEASE", patterns)
+
+    return nlp, matcher
+
+
+# ---------------------------------------------------------------------------
+# Regex patterns (case count extraction)
+# ---------------------------------------------------------------------------
+
 _COUNT_PATTERNS: list[re.Pattern] = [
     re.compile(r"(\d[\d,]*).{0,30}?\bcases?\b", re.I),
     re.compile(r"(\d[\d,]*)\s+(?:people|patients|residents|individuals).{0,20}?(?:infected|diagnosed|affected)", re.I),
@@ -124,7 +149,6 @@ def _find_case_count(text: str) -> int | None:
                 return int(m.group(1).replace(",", ""))
             except ValueError:
                 pass
-    # Word-number fallback: "three cases", "three new measles cases"
     m = re.search(
         r"\b(" + "|".join(_WORD_NUMBERS) + r")\b.{0,30}?\bcases?\b", text, re.I
     )
@@ -133,28 +157,65 @@ def _find_case_count(text: str) -> int | None:
     return None
 
 
-def _find_county_fips(text: str) -> str | None:
-    lower = text.lower()
-    # Try multi-word county names first (e.g. "palm beach", "miami-dade")
-    for name in sorted(COUNTY_FIPS_MAP, key=len, reverse=True):
-        if name in lower:
-            return COUNTY_FIPS_MAP[name]
-    # Try cities
-    for city in sorted(CITY_TO_FIPS, key=len, reverse=True):
-        if city in lower:
-            return CITY_TO_FIPS[city]
-    return None
+# ---------------------------------------------------------------------------
+# spaCy-based extraction helpers
+# ---------------------------------------------------------------------------
 
+def _find_disease_spacy(doc, matcher) -> tuple[str | None, int | None]:
+    """
+    Use PhraseMatcher to find the first disease keyword in the document.
+    Returns (disease_name, disease_id_or_None).
 
-def _find_disease(text: str) -> tuple[str | None, int | None]:
-    """Return (disease_name, disease_id_or_None)."""
-    lower = text.lower()
-    for keyword in sorted(DISEASE_KEYWORD_MAP, key=len, reverse=True):
-        if keyword in lower:
-            name = DISEASE_KEYWORD_MAP[keyword]
-            disease_id = _disease_name_to_id.get(name)
-            return name, disease_id
+    Multi-word phrases (e.g. "whooping cough", "hepatitis a") are matched
+    correctly because PhraseMatcher respects token boundaries and the LOWER
+    attribute normalises case.
+    """
+    matches = matcher(doc)
+    if not matches:
+        return None, None
+
+    # Sort by span start; prefer longer matches if overlapping
+    matches.sort(key=lambda m: (m[1], -(m[2] - m[1])))
+    for _, start, end in matches:
+        keyword = doc[start:end].text.lower()
+        disease_name = DISEASE_KEYWORD_MAP.get(keyword)
+        if disease_name:
+            return disease_name, _disease_name_to_id.get(disease_name)
+
     return None, None
+
+
+def _find_county_fips_spacy(doc) -> str | None:
+    """
+    Use spaCy NER GPE entities to extract location names, then resolve to
+    a Florida county FIPS code.
+
+    Falls back to the substring approach for multi-word county names that
+    spaCy might tokenise differently (e.g. "Miami-Dade", "Palm Beach").
+    """
+    # Build a combined lower-cased text for the substring fallback
+    lower_text = doc.text.lower()
+
+    # 1. Try NER GPE entities first (most reliable for city names)
+    for ent in doc.ents:
+        if ent.label_ == "GPE":
+            candidate = ent.text.lower().strip()
+            if candidate in COUNTY_FIPS_MAP:
+                return COUNTY_FIPS_MAP[candidate]
+            if candidate in CITY_TO_FIPS:
+                return CITY_TO_FIPS[candidate]
+
+    # 2. Substring fallback: try multi-word county names (longest first)
+    for name in sorted(COUNTY_FIPS_MAP, key=len, reverse=True):
+        if name in lower_text:
+            return COUNTY_FIPS_MAP[name]
+
+    # 3. Substring fallback: city names
+    for city in sorted(CITY_TO_FIPS, key=len, reverse=True):
+        if city in lower_text:
+            return CITY_TO_FIPS[city]
+
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -176,13 +237,17 @@ def extract_signals(text: str) -> list[dict]:
     if not text or not text.strip():
         return []
 
-    disease_name, disease_id = _find_disease(text)
-    county_fips = _find_county_fips(text)
-    case_count = _find_case_count(text)
+    nlp, matcher = _get_nlp()
 
-    # If we couldn't identify a disease this article isn't useful
+    # Truncate to 50k chars to keep spaCy fast on large bodies
+    doc = nlp(text[:50_000])
+
+    disease_name, disease_id = _find_disease_spacy(doc, matcher)
     if disease_name is None:
         return []
+
+    county_fips = _find_county_fips_spacy(doc)
+    case_count = _find_case_count(text)
 
     # Confidence heuristic: reward each field found
     confidence = 0.4  # base: disease was found

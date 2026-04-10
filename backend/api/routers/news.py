@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.models.database import ArticleSignal, NewsArticle, get_db
+from backend.services.signal_dedup import dedup_signals
 
 router = APIRouter(prefix="/news", tags=["news"])
 
@@ -32,12 +33,16 @@ class NewsSignalOut(BaseModel):
 async def list_signals(
     county_fips: str | None = Query(None, description="Filter by county FIPS code"),
     disease_id: int | None = Query(None, description="Filter by disease ID"),
+    include_duplicates: bool = Query(False, description="Include duplicate signals"),
     limit: int = Query(50, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
 ) -> list[NewsSignalOut]:
     """
     Return NLP-extracted disease signals from news articles, joined with
     article metadata (URL, title, source, published date).
+
+    Duplicate signals (same disease/county/~2-week window, lower confidence)
+    are hidden by default. Pass include_duplicates=true to see all.
     """
     q = (
         select(ArticleSignal)
@@ -50,6 +55,8 @@ async def list_signals(
         q = q.where(ArticleSignal.county_fips == county_fips)
     if disease_id is not None:
         q = q.where(ArticleSignal.disease_id == disease_id)
+    if not include_duplicates:
+        q = q.where(ArticleSignal.is_duplicate.is_(False))
 
     result = await db.execute(q)
     signals = result.scalars().all()

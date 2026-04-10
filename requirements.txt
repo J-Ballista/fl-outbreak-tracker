@@ -17,3 +17,7 @@ httpx==0.28.1
 beautifulsoup4==4.14.3
 lxml==6.0.2
 schedule==1.2.2
+
+# NLP
+spacy==3.8.14
+# Download model separately: python -m spacy download en_core_web_sm

@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from backend.models.database import ArticleSignal, AsyncSessionLocal, Disease, NewsArticle
 from backend.nlp.classifier import extract_signals, set_disease_id_cache
+from backend.services.signal_dedup import dedup_signals
 
 log = logging.getLogger(__name__)
 
@@ -363,6 +364,11 @@ async def ingest_all_feeds(feeds: list[FeedConfig] | None = None) -> int:
         total += await ingest_feed(feed)
     total += await ingest_gdelt()
     log.info("Full ingestion complete — %d new articles stored.", total)
+
+    # Dedup signals across all ingest sources
+    async with AsyncSessionLocal() as session:
+        await dedup_signals(session)
+
     return total
 
 
