@@ -35,7 +35,8 @@ interface FloridaMapProps {
   vaccinationByFips: Map<string, number>;
   alertsByFips: Map<string, AlertSeverity>;
   layerMode: LayerMode;
-  herdThreshold?: number;
+  /** Safe religious-exemption ceiling = (100 - herd_threshold) - medical_contraindication_pct */
+  safeExemptThreshold?: number | null;
   onCountyClick: (fips: string, name: string) => void;
 }
 
@@ -64,7 +65,7 @@ export default function FloridaMap({
   vaccinationByFips,
   alertsByFips,
   layerMode,
-  herdThreshold = 90,
+  safeExemptThreshold = 5,
   onCountyClick,
 }: FloridaMapProps) {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -113,8 +114,8 @@ export default function FloridaMap({
       const scale = d3.scaleSequential(d3.interpolateOrRd).domain([0, hi]);
       setColorScale(() => (v: number) => scale(v));
       setDomain([0, hi]);
-      // Threshold marker: max "safe" exemption level = 100 - herd threshold
-      setThresholdPct(100 - herdThreshold);
+      // Threshold marker: safe exemption ceiling already computed upstream
+      setThresholdPct(safeExemptThreshold ?? 5);
     } else {
       const values = Array.from(casesByFips.values());
       const max = values.length ? Math.max(...values) : 1;
@@ -122,7 +123,7 @@ export default function FloridaMap({
       setColorScale(() => (v: number) => scale(v));
       setDomain([0, max]);
     }
-  }, [casesByFips, vaccinationByFips, layerMode, herdThreshold]);
+  }, [casesByFips, vaccinationByFips, layerMode, safeExemptThreshold]);
 
   // ------------------------------------------------------------------
   // Render / re-render map

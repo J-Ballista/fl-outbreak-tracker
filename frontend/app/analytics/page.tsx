@@ -10,6 +10,11 @@ import {
   useCaseTrend,
   useCountyVaccTrend,
 } from "@/app/hooks/useMapData";
+import {
+  safeExemptThreshold as computeSafeExempt,
+  safeExemptThresholdComposite,
+  avgMedicalContraindication,
+} from "@/app/lib/api";
 
 const AnalyticsChart = dynamic(() => import("@/app/components/AnalyticsChart"), {
   ssr: false,
@@ -41,7 +46,14 @@ export default function AnalyticsPage() {
     () => diseases.find((d) => d.id === selectedDiseaseId),
     [diseases, selectedDiseaseId]
   );
-  const herdThreshold = selectedDisease?.herd_threshold_pct ?? null;
+
+  const chartSafeExempt = selectedDisease
+    ? computeSafeExempt(selectedDisease)
+    : safeExemptThresholdComposite(diseases);
+
+  const chartMedicalPct = selectedDisease
+    ? (selectedDisease.medical_contraindication_pct ?? 0.3)
+    : avgMedicalContraindication(diseases);
 
   const selectedCounty = useMemo(
     () => counties.find((c) => c.fips_code === selectedFips),
@@ -130,8 +142,18 @@ export default function AnalyticsPage() {
         <div className="mt-6 rounded-xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
           {selectedDisease && (
             <div className="mb-4 flex flex-wrap gap-3">
-              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600 ring-1 ring-slate-200">
-                Herd threshold: {selectedDisease.herd_threshold_pct ?? "—"}%
+              {selectedDisease.herd_threshold_pct != null && (
+                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600 ring-1 ring-slate-200">
+                  Herd threshold: {selectedDisease.herd_threshold_pct}%
+                </span>
+              )}
+              {chartSafeExempt != null && (
+                <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700 ring-1 ring-amber-200">
+                  Safe exempt ceiling: &lt;{chartSafeExempt}%
+                </span>
+              )}
+              <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700 ring-1 ring-blue-200">
+                Medical contraindications: {chartMedicalPct}%
               </span>
               {selectedDisease.r0_estimate && (
                 <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600 ring-1 ring-slate-200">
@@ -143,7 +165,8 @@ export default function AnalyticsPage() {
           <AnalyticsChart
             caseTrend={caseTrend}
             vaccTrend={vaccTrend}
-            herdThreshold={herdThreshold}
+            safeExemptThreshold={chartSafeExempt}
+            medicalContraindicationPct={chartMedicalPct}
             countyName={selectedCounty?.name}
             diseaseName={selectedDisease?.name}
           />

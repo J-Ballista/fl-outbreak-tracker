@@ -13,6 +13,11 @@ import type {
   AgeBreakdownRow,
   AcquisitionBreakdownRow,
 } from "@/app/lib/api";
+import {
+  safeExemptThreshold as computeSafeExempt,
+  safeExemptThresholdComposite,
+  avgMedicalContraindication,
+} from "@/app/lib/api";
 import TrendSparkline from "./TrendSparkline";
 
 interface CountyDetailPanelProps {
@@ -107,16 +112,22 @@ export default function CountyDetailPanel({
     0
   );
 
-  // Herd threshold for the sparkline dotted line
-  const trendHerdThreshold: number | null = (() => {
+  // Safe exemption threshold for the sparkline amber dotted line
+  const trendSafeExempt: number | null = (() => {
     if (selectedDiseaseId !== undefined) {
-      return diseases.find((d) => d.id === selectedDiseaseId)?.herd_threshold_pct ?? null;
+      const d = diseases.find((d) => d.id === selectedDiseaseId);
+      return d ? computeSafeExempt(d) : null;
     }
-    const thresholds = diseases
-      .map((d) => d.herd_threshold_pct)
-      .filter((t): t is number => t != null);
-    if (thresholds.length === 0) return null;
-    return thresholds.reduce((a, b) => a + b, 0) / thresholds.length;
+    return safeExemptThresholdComposite(diseases);
+  })();
+
+  // Medical contraindication % for the sparkline blue dotted line
+  const trendMedicalPct: number = (() => {
+    if (selectedDiseaseId !== undefined) {
+      const d = diseases.find((d) => d.id === selectedDiseaseId);
+      return d?.medical_contraindication_pct ?? 0.3;
+    }
+    return avgMedicalContraindication(diseases);
   })();
 
   // YoY exemption rate delta — computed on exempt_pct = 100 - vaccinated_pct
@@ -259,7 +270,8 @@ export default function CountyDetailPanel({
                 <TrendSparkline
                   caseTrend={trend}
                   vaccTrend={vaccTrend}
-                  herdThreshold={trendHerdThreshold}
+                  safeExemptThreshold={trendSafeExempt}
+                  medicalContraindicationPct={trendMedicalPct}
                   width={292}
                   height={190}
                 />

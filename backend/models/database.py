@@ -83,6 +83,7 @@ class Disease(Base):
     icd10_code: Mapped[Optional[str]] = mapped_column(String(16))
     herd_threshold_pct: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2))  # 0–100
     r0_estimate: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 2))
+    medical_contraindication_pct: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2))  # % of population unable to vaccinate for medical reasons
 
     cases: Mapped[list["DiseaseCase"]] = relationship(back_populates="disease")
     vaccination_rates: Mapped[list["VaccinationRate"]] = relationship(back_populates="disease")

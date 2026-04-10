@@ -19,6 +19,10 @@ import {
   useAcquisitionBreakdown,
 } from "@/app/hooks/useMapData";
 import type { LayerMode, AlertSeverity } from "@/app/components/FloridaMap";
+import {
+  safeExemptThreshold as computeSafeExempt,
+  safeExemptThresholdComposite,
+} from "@/app/lib/api";
 
 // FloridaMap uses D3 DOM APIs — load client-side only
 const FloridaMap = dynamic(() => import("@/app/components/FloridaMap"), {
@@ -137,7 +141,10 @@ export default function DashboardPage() {
   );
   const countiesWithCases = summaryRows.filter((r) => r.total_cases > 0).length;
   const selectedDisease = diseases.find((d) => d.id === selectedDiseaseId);
-  const herdThreshold = selectedDisease?.herd_threshold_pct ?? 90;
+  // Safe religious-exemption ceiling for the map layer threshold marker
+  const mapSafeExemptThreshold: number | null = selectedDisease
+    ? computeSafeExempt(selectedDisease)
+    : safeExemptThresholdComposite(diseases);
 
   // ── County detail data ──
   const selectedCountyCases = useMemo(
@@ -270,7 +277,7 @@ export default function DashboardPage() {
               vaccinationByFips={vaccinationByFips}
               alertsByFips={alertsByFips}
               layerMode={layerMode}
-              herdThreshold={herdThreshold}
+              safeExemptThreshold={mapSafeExemptThreshold}
               onCountyClick={handleCountyClick}
             />
           </div>

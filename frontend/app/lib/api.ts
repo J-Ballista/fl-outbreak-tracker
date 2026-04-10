@@ -20,6 +20,7 @@ export interface Disease {
   icd10_code: string | null;
   herd_threshold_pct: number | null;
   r0_estimate: number | null;
+  medical_contraindication_pct: number | null;
 }
 
 export interface CaseSummary {
@@ -87,6 +88,47 @@ export interface AgeBreakdownRow {
 export interface AcquisitionBreakdownRow {
   acquisition: string;
   total_cases: number;
+}
+
+// ---------------------------------------------------------------------------
+// Threshold helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * For a single disease: safe religious-exemption ceiling
+ *   = (100 - herd_threshold_pct) - medical_contraindication_pct
+ *
+ * Returns null when herd_threshold_pct is unknown (some diseases have no
+ * established herd immunity figure).
+ */
+export function safeExemptThreshold(disease: Disease): number | null {
+  if (disease.herd_threshold_pct == null) return null;
+  const med = disease.medical_contraindication_pct ?? 0.3; // fallback to ~national avg
+  return +(100 - disease.herd_threshold_pct - med).toFixed(2);
+}
+
+/**
+ * For multiple diseases (composite / "all diseases" view):
+ * averages (100 - herd - med) across only diseases that have a herd threshold.
+ * Returns null if none of the diseases have herd data.
+ */
+export function safeExemptThresholdComposite(diseases: Disease[]): number | null {
+  const eligible = diseases.filter((d) => d.herd_threshold_pct != null);
+  if (eligible.length === 0) return null;
+  const sum = eligible.reduce((acc, d) => {
+    const med = d.medical_contraindication_pct ?? 0.3;
+    return acc + (100 - d.herd_threshold_pct! - med);
+  }, 0);
+  return +(sum / eligible.length).toFixed(2);
+}
+
+/**
+ * Average medical contraindication % across diseases (for the blue reference line).
+ */
+export function avgMedicalContraindication(diseases: Disease[]): number {
+  if (diseases.length === 0) return 0.3;
+  const sum = diseases.reduce((acc, d) => acc + (d.medical_contraindication_pct ?? 0.3), 0);
+  return +(sum / diseases.length).toFixed(2);
 }
 
 // ---------------------------------------------------------------------------

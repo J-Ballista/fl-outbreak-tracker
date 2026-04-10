@@ -6,8 +6,11 @@ import type { TrendPoint, VaccTrendPoint } from "@/app/lib/api";
 
 interface Props {
   caseTrend: TrendPoint[];
-  vaccTrend?: VaccTrendPoint[];       // year-over-year vaccination rates
-  herdThreshold?: number | null;      // static dotted reference line (0–100)
+  vaccTrend?: VaccTrendPoint[];
+  /** Safe religious-exemption ceiling = (100 - herd) - medical_contraindication_pct */
+  safeExemptThreshold?: number | null;
+  /** Average medical contraindication % for the blue reference line */
+  medicalContraindicationPct?: number | null;
   width?: number;
   height?: number;
 }
@@ -19,7 +22,8 @@ function fmt(v: number): string {
 export default function TrendSparkline({
   caseTrend,
   vaccTrend = [],
-  herdThreshold,
+  safeExemptThreshold,
+  medicalContraindicationPct,
   width = 292,
   height = 190,
 }: Props) {
@@ -31,7 +35,7 @@ export default function TrendSparkline({
     const svg = d3.select(svgRef.current);
     svg.selectAll("*").remove();
 
-    const hasVacc = vaccTrend.length > 0 || herdThreshold != null;
+    const hasVacc = vaccTrend.length > 0 || safeExemptThreshold != null || medicalContraindicationPct != null;
     const margin = { top: 16, right: hasVacc ? 52 : 14, bottom: 32, left: 44 };
     const w = width - margin.left - margin.right;
     const h = height - margin.top - margin.bottom;
@@ -83,11 +87,10 @@ export default function TrendSparkline({
 
     // ── Right Y scale — vaccination % ────────────────────────────────────────
 
-    // Exempt threshold = 100 - herd threshold (e.g. herd=95% → safe if exempt < 5%)
-    const exemptThreshold = herdThreshold != null ? 100 - herdThreshold : null;
     const vaccValues = [
       ...parsedVacc.map((d) => d.value),
-      ...(exemptThreshold != null ? [exemptThreshold] : []),
+      ...(safeExemptThreshold != null ? [safeExemptThreshold] : []),
+      ...(medicalContraindicationPct != null ? [medicalContraindicationPct] : []),
     ];
     const vaccCenter = vaccValues.length
       ? vaccValues.reduce((a, b) => a + b, 0) / vaccValues.length
@@ -236,8 +239,9 @@ export default function TrendSparkline({
 
     // ── Herd threshold static dotted line (amber) ────────────────────────────
 
-    if (exemptThreshold != null) {
-      const ty = yRight(exemptThreshold);
+    // ── Amber dotted: safe religious-exemption ceiling ───────────────────────
+    if (safeExemptThreshold != null) {
+      const ty = yRight(safeExemptThreshold);
       g.append("line")
         .attr("x1", 0).attr("x2", w)
         .attr("y1", ty).attr("y2", ty)
@@ -245,12 +249,28 @@ export default function TrendSparkline({
         .attr("stroke-width", 2)
         .attr("stroke-dasharray", "6,4");
 
-      // Label on left — "safe zone" ceiling for exemptions
       g.append("text")
         .attr("x", 4).attr("y", ty - 5)
         .attr("fill", "#d97706")
-        .attr("font-size", 12).attr("font-weight", "700")
-        .text(`Safe <${fmt(exemptThreshold)}%`);
+        .attr("font-size", 11).attr("font-weight", "700")
+        .text(`Safe <${fmt(safeExemptThreshold)}%`);
+    }
+
+    // ── Blue dotted: medical contraindication baseline ────────────────────────
+    if (medicalContraindicationPct != null) {
+      const ty = yRight(medicalContraindicationPct);
+      g.append("line")
+        .attr("x1", 0).attr("x2", w)
+        .attr("y1", ty).attr("y2", ty)
+        .attr("stroke", "#3b82f6")
+        .attr("stroke-width", 1.5)
+        .attr("stroke-dasharray", "4,4");
+
+      g.append("text")
+        .attr("x", 4).attr("y", ty - 4)
+        .attr("fill", "#3b82f6")
+        .attr("font-size", 10).attr("font-weight", "600")
+        .text(`Med. exempt ${fmt(medicalContraindicationPct)}%`);
     }
 
     // ── Interactive hover ────────────────────────────────────────────────────
@@ -343,7 +363,7 @@ export default function TrendSparkline({
         tipRect.attr("x", 0).attr("y", 0).attr("width", boxW).attr("height", boxH);
       })
       .on("mouseleave", () => hoverGroup.style("display", "none"));
-  }, [caseTrend, vaccTrend, herdThreshold, width, height]);
+  }, [caseTrend, vaccTrend, safeExemptThreshold, medicalContraindicationPct, width, height]);
 
   return (
     <div>
@@ -359,7 +379,7 @@ export default function TrendSparkline({
             Exempt rate YoY (right axis)
           </span>
         )}
-        {herdThreshold != null && (
+        {safeExemptThreshold != null && (
           <span className="flex items-center gap-1.5">
             <span
               className="inline-block w-5"
@@ -369,7 +389,20 @@ export default function TrendSparkline({
                   "repeating-linear-gradient(90deg,#d97706 0,#d97706 5px,transparent 5px,transparent 9px)",
               }}
             />
-            Herd threshold
+            Safe exempt ceiling
+          </span>
+        )}
+        {medicalContraindicationPct != null && (
+          <span className="flex items-center gap-1.5">
+            <span
+              className="inline-block w-5"
+              style={{
+                height: 2,
+                background:
+                  "repeating-linear-gradient(90deg,#3b82f6 0,#3b82f6 4px,transparent 4px,transparent 8px)",
+              }}
+            />
+            Medical contraindications
           </span>
         )}
       </div>

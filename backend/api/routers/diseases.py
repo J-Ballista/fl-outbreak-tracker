@@ -21,6 +21,7 @@ class DiseaseOut(BaseModel):
     icd10_code: str | None
     herd_threshold_pct: float | None
     r0_estimate: float | None
+    medical_contraindication_pct: float | None
 
     model_config = {"from_attributes": True}
 

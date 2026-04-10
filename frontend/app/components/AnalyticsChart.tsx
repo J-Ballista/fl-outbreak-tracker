@@ -7,7 +7,8 @@ import type { TrendPoint, VaccTrendPoint } from "@/app/lib/api";
 interface AnalyticsChartProps {
   caseTrend: TrendPoint[];
   vaccTrend: VaccTrendPoint[];
-  herdThreshold: number | null;
+  safeExemptThreshold: number | null;
+  medicalContraindicationPct: number | null;
   countyName?: string;
   diseaseName?: string;
 }
@@ -23,7 +24,8 @@ const MARGIN = { top: 24, right: 72, bottom: 48, left: 56 };
 export default function AnalyticsChart({
   caseTrend,
   vaccTrend,
-  herdThreshold,
+  safeExemptThreshold,
+  medicalContraindicationPct,
   countyName,
   diseaseName,
 }: AnalyticsChartProps) {
@@ -57,7 +59,7 @@ export default function AnalyticsChart({
       return;
     }
 
-    const hasVacc = vaccTrend.length > 0 || herdThreshold != null;
+    const hasVacc = vaccTrend.length > 0 || safeExemptThreshold != null || medicalContraindicationPct != null;
 
     // ── Parse data ───────────────────────────────────────────────────────────
 
@@ -92,11 +94,10 @@ export default function AnalyticsChart({
       .range([h, 0])
       .nice();
 
-    // Exempt threshold = 100 - herd threshold (e.g. herd=95% → danger if exempt > 5%)
-    const exemptThreshold = herdThreshold != null ? 100 - herdThreshold : null;
     const vaccValues = [
       ...parsedVacc.map((d) => d.value),
-      ...(exemptThreshold != null ? [exemptThreshold] : []),
+      ...(safeExemptThreshold != null ? [safeExemptThreshold] : []),
+      ...(medicalContraindicationPct != null ? [medicalContraindicationPct] : []),
     ];
     const vaccCenter = vaccValues.length
       ? vaccValues.reduce((a, b) => a + b, 0) / vaccValues.length
@@ -232,10 +233,10 @@ export default function AnalyticsChart({
         .attr("stroke-width", 1.5);
     }
 
-    // ── Exemption threshold dotted line ──────────────────────────────────────
+    // ── Amber dotted: safe religious-exemption ceiling ───────────────────────
 
-    if (exemptThreshold != null) {
-      const ty = yRight(exemptThreshold);
+    if (safeExemptThreshold != null) {
+      const ty = yRight(safeExemptThreshold);
       g.append("line")
         .attr("x1", 0).attr("x2", w)
         .attr("y1", ty).attr("y2", ty)
@@ -247,7 +248,25 @@ export default function AnalyticsChart({
         .attr("x", w + 4).attr("y", ty + 4)
         .attr("fill", "#d97706")
         .attr("font-size", 11).attr("font-weight", "700")
-        .text(`Safe <${fmt(exemptThreshold)}%`);
+        .text(`Safe <${fmt(safeExemptThreshold)}%`);
+    }
+
+    // ── Blue dotted: medical contraindication baseline ────────────────────────
+
+    if (medicalContraindicationPct != null) {
+      const ty = yRight(medicalContraindicationPct);
+      g.append("line")
+        .attr("x1", 0).attr("x2", w)
+        .attr("y1", ty).attr("y2", ty)
+        .attr("stroke", "#3b82f6")
+        .attr("stroke-width", 1.5)
+        .attr("stroke-dasharray", "4,4");
+
+      g.append("text")
+        .attr("x", w + 4).attr("y", ty + 4)
+        .attr("fill", "#3b82f6")
+        .attr("font-size", 10).attr("font-weight", "600")
+        .text(`Med. ${fmt(medicalContraindicationPct)}%`);
     }
 
     // ── Interactive hover ─────────────────────────────────────────────────────
@@ -339,7 +358,7 @@ export default function AnalyticsChart({
       })
       .on("mouseleave", () => hoverGroup.style("display", "none"));
 
-  }, [caseTrend, vaccTrend, herdThreshold, countyName]);
+  }, [caseTrend, vaccTrend, safeExemptThreshold, medicalContraindicationPct, countyName]);
 
   return (
     <div>
@@ -367,7 +386,7 @@ export default function AnalyticsChart({
             Exempt rate YoY (right axis)
           </span>
         )}
-        {herdThreshold != null && (
+        {safeExemptThreshold != null && (
           <span className="flex items-center gap-1.5">
             <span
               className="inline-block w-6"
@@ -377,7 +396,20 @@ export default function AnalyticsChart({
                   "repeating-linear-gradient(90deg,#d97706 0,#d97706 5px,transparent 5px,transparent 9px)",
               }}
             />
-            Safe exemption threshold (&lt;{fmt(100 - herdThreshold)}%)
+            Safe exempt ceiling (&lt;{fmt(safeExemptThreshold)}%)
+          </span>
+        )}
+        {medicalContraindicationPct != null && (
+          <span className="flex items-center gap-1.5">
+            <span
+              className="inline-block w-6"
+              style={{
+                height: 2,
+                background:
+                  "repeating-linear-gradient(90deg,#3b82f6 0,#3b82f6 4px,transparent 4px,transparent 8px)",
+              }}
+            />
+            Medical contraindications ({fmt(medicalContraindicationPct)}%)
           </span>
         )}
       </div>
