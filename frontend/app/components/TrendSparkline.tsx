@@ -234,6 +234,14 @@ export default function TrendSparkline({
               .y((d) => yRight(d.value))
               .curve(d3.curveMonotoneX)
           );
+      } else if (parsedVacc.length === 1) {
+        // Single year of data — label the dot so users know more will come
+        g.append("text")
+          .attr("x", xScale(parsedVacc[0].date) + 6)
+          .attr("y", yRight(parsedVacc[0].value) - 6)
+          .attr("fill", "#c2410c")
+          .attr("font-size", 9)
+          .text(`${parsedVacc[0].date.getFullYear()} (1 yr)`);
       }
     }
 

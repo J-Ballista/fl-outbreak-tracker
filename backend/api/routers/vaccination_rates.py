@@ -87,15 +87,23 @@ async def county_vacc_trend(
     db: AsyncSession = Depends(get_db),
 ) -> list[VaccTrendPoint]:
     """
-    Return year-over-year average vaccination rate for a county.
-    Averaged across all diseases unless disease_id is specified.
+    Return year-over-year religious exemption rate for a county (real FL SHOTS
+    data only — facility_type='school_religious_exemption').  Averaged across
+    all diseases unless disease_id is specified.
+
+    Synthetic seed rows (facility_type='school') are intentionally excluded
+    because they represent vaccination rates rather than exemption rates and
+    would create a spurious drop on the exemption trend line.
     """
     q = (
         select(
             VaccinationRate.survey_year,
             func.avg(VaccinationRate.vaccinated_pct).label("vaccinated_pct"),
         )
-        .where(VaccinationRate.county_fips == fips_code)
+        .where(
+            VaccinationRate.county_fips == fips_code,
+            VaccinationRate.facility_type == "school_religious_exemption",
+        )
         .group_by(VaccinationRate.survey_year)
         .order_by(VaccinationRate.survey_year)
     )
