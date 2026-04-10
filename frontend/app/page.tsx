@@ -95,8 +95,18 @@ export default function DashboardPage() {
     [summaryRows]
   );
 
+  // Use exempt_religious_pct for the map layer (real FL SHOTS data where available,
+  // fall back to 100 - vaccinated_pct for synthetic seed rows that lack the field)
   const vaccinationByFips = useMemo<Map<string, number>>(
-    () => new Map(vaccRows.map((r) => [r.county_fips, r.vaccinated_pct])),
+    () =>
+      new Map(
+        vaccRows.map((r) => [
+          r.county_fips,
+          r.exempt_religious_pct != null
+            ? r.exempt_religious_pct
+            : +(100 - r.vaccinated_pct).toFixed(2),
+        ])
+      ),
     [vaccRows]
   );
 
@@ -238,7 +248,7 @@ export default function DashboardPage() {
                     : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"
                 }`}
               >
-                {mode === "cases" ? "Cases" : "Vaccination Rate"}
+                {mode === "cases" ? "Cases" : "Exemption Rate"}
               </button>
             ))}
             {selectedCounty && (
@@ -291,7 +301,7 @@ export default function DashboardPage() {
                     Per 100k
                   </th>
                   <th className="px-4 py-3 text-right font-medium text-slate-600">
-                    Vacc %
+                    Exempt %
                   </th>
                   <th className="px-4 py-3 text-right font-medium text-slate-600">
                     Alert
@@ -358,7 +368,12 @@ export default function DashboardPage() {
                           {per100k}
                         </td>
                         <td className="px-4 py-2 text-right text-slate-500">
-                          {vacc ? `${vacc.vaccinated_pct.toFixed(1)}%` : "—"}
+                          {vacc
+                            ? `${(vacc.exempt_religious_pct != null
+                                ? vacc.exempt_religious_pct
+                                : 100 - vacc.vaccinated_pct
+                              ).toFixed(1)}%`
+                            : "—"}
                         </td>
                         <td className="px-4 py-2 text-right">
                           {alertSeverity ? (
@@ -391,7 +406,7 @@ export default function DashboardPage() {
       </main>
 
       <footer className="py-4 text-center text-xs text-slate-400">
-        Data: FL Health CHARTS · FL DOH VPD Reports · Local news signals
+        Data: FL Health CHARTS · FL DOH ArcGIS (religious exemptions via FL SHOTS) · Local news signals
       </footer>
 
       {/* County detail panel (slide-out) */}

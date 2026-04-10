@@ -16,8 +16,8 @@ export default function Legend({ colorScale, domain, label = "cases", thresholdP
     Math.round(min + i * step)
   );
 
-  const maxLabel = label === "Vaccination %" ? `${max.toFixed(1)}%` : max.toLocaleString();
-  const minLabel = label === "Vaccination %" ? `${min.toFixed(1)}%` : "0";
+  const maxLabel = label === "Exemption %" ? `${max.toFixed(1)}%` : max.toLocaleString();
+  const minLabel = label === "Exemption %" ? `${min.toFixed(1)}%` : "0";
 
   const markerLeft =
     thresholdPct !== undefined && max > min
@@ -46,7 +46,7 @@ export default function Legend({ colorScale, domain, label = "cases", thresholdP
               className="absolute -bottom-4 left-1/2 -translate-x-1/2 whitespace-nowrap text-amber-600 font-semibold"
               style={{ fontSize: 9 }}
             >
-              Herd
+              Safe
             </span>
           </div>
         )}

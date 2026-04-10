@@ -106,18 +106,15 @@ export default function FloridaMap({
   useEffect(() => {
     if (layerMode === "vaccination") {
       const values = Array.from(vaccinationByFips.values());
-      const dataMin = values.length ? Math.min(...values) : 0;
-      const dataMax = values.length ? Math.max(...values) : 100;
-      // Guard against domain collapse — ensure threshold is always within [lo, hi]
-      const lo = Math.min(dataMin, herdThreshold - 1);
-      const hi = Math.max(dataMax, herdThreshold + 1);
-      const scale = d3
-        .scaleDiverging(d3.interpolateRgbBasis(["#dc2626", "#f59e0b", "#15803d"]))
-        .domain([lo, herdThreshold, hi])
-        .clamp(true);
+      const dataMax = values.length ? Math.max(...values) : 20;
+      // Domain: 0 → max exemption; ensure at least 5% wide so low-exemption
+      // counties still show variation rather than all appearing white.
+      const hi = Math.max(dataMax, 5);
+      const scale = d3.scaleSequential(d3.interpolateOrRd).domain([0, hi]);
       setColorScale(() => (v: number) => scale(v));
-      setDomain([lo, hi]);
-      setThresholdPct(herdThreshold);
+      setDomain([0, hi]);
+      // Threshold marker: max "safe" exemption level = 100 - herd threshold
+      setThresholdPct(100 - herdThreshold);
     } else {
       const values = Array.from(casesByFips.values());
       const max = values.length ? Math.max(...values) : 1;
@@ -209,7 +206,7 @@ export default function FloridaMap({
       .style("pointer-events", "none");
   }, [geojson, casesByFips, vaccinationByFips, alertsByFips, layerMode, colorScale, onCountyClick]);
 
-  const legendLabel = layerMode === "vaccination" ? "Vaccination %" : "Cases";
+  const legendLabel = layerMode === "vaccination" ? "Exemption %" : "Cases";
 
   return (
     <div className="relative w-full">
@@ -225,7 +222,7 @@ export default function FloridaMap({
           y={tooltip.y}
           county={tooltip.county}
           cases={layerMode === "cases" ? tooltip.value : null}
-          vaccPct={layerMode === "vaccination" ? tooltip.value : null}
+          exemptPct={layerMode === "vaccination" ? tooltip.value : null}
         />
       )}
       <div className="mt-4 flex justify-end">

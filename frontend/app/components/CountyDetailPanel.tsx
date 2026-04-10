@@ -119,14 +119,15 @@ export default function CountyDetailPanel({
     return thresholds.reduce((a, b) => a + b, 0) / thresholds.length;
   })();
 
-  // YoY vaccination rate delta (latest survey year vs prior year)
+  // YoY exemption rate delta — computed on exempt_pct = 100 - vaccinated_pct
+  // Rising exemptions = bad, so badge uses invert=true at the call site
   const vaccYoY: number | null = (() => {
     if (vaccTrend.length < 2) return null;
     const sorted = [...vaccTrend].sort((a, b) => a.survey_year - b.survey_year);
-    const latest = sorted[sorted.length - 1].vaccinated_pct;
-    const prior = sorted[sorted.length - 2].vaccinated_pct;
-    if (prior === 0) return null;
-    return ((latest - prior) / prior) * 100;
+    const latestExempt = 100 - sorted[sorted.length - 1].vaccinated_pct;
+    const priorExempt = 100 - sorted[sorted.length - 2].vaccinated_pct;
+    if (priorExempt === 0) return null;
+    return ((latestExempt - priorExempt) / priorExempt) * 100;
   })();
 
   // YoY case count delta (group monthly trend by calendar year)
@@ -328,35 +329,51 @@ export default function CountyDetailPanel({
             </section>
           )}
 
-          {/* ── Vaccination Rate ── */}
+          {/* ── School Exemption Rate ── */}
           {vaccSummary !== null && (
             <section>
               <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                Vaccination Rate
+                School Exemption Rate
                 <span className="ml-2 font-normal text-slate-400 normal-case">
-                  {vaccSummary.survey_year} survey
+                  {vaccSummary.survey_year} · religious
                 </span>
               </h3>
 
-              <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200 mb-3">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-sm font-medium text-slate-700 flex items-center flex-wrap gap-1">
-                    {vaccSummary.vaccinated_pct.toFixed(1)}% avg across diseases
-                    <YoYBadge delta={vaccYoY} />
-                  </span>
-                </div>
-                <div className="h-2 w-full rounded-full bg-slate-200 overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-green-500 transition-all"
-                    style={{ width: `${Math.min(vaccSummary.vaccinated_pct, 100)}%` }}
-                  />
-                </div>
-                {vaccSummary.vaccinated_pct < 90 && (
-                  <p className="mt-1.5 text-xs text-amber-600 font-medium">
-                    Below recommended 90% threshold
-                  </p>
-                )}
-              </div>
+              {(() => {
+                const exemptPct =
+                  vaccSummary.exempt_religious_pct != null
+                    ? vaccSummary.exempt_religious_pct
+                    : +(100 - vaccSummary.vaccinated_pct).toFixed(2);
+                const isHighRisk = exemptPct > 10;
+                const isMedRisk = exemptPct > 5;
+                return (
+                  <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200 mb-3">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-sm font-medium text-slate-700 flex items-center flex-wrap gap-1">
+                        {exemptPct.toFixed(1)}% exempt avg
+                        <YoYBadge delta={vaccYoY} invert />
+                      </span>
+                    </div>
+                    <div className="h-2 w-full rounded-full bg-slate-200 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all ${
+                          isHighRisk ? "bg-red-500" : isMedRisk ? "bg-amber-500" : "bg-green-500"
+                        }`}
+                        style={{ width: `${Math.min(exemptPct * 4, 100)}%` }}
+                      />
+                    </div>
+                    {isHighRisk ? (
+                      <p className="mt-1.5 text-xs text-red-600 font-medium">
+                        High exemption — immunity gap risk
+                      </p>
+                    ) : isMedRisk ? (
+                      <p className="mt-1.5 text-xs text-amber-600 font-medium">
+                        Moderate exemption — monitor closely
+                      </p>
+                    ) : null}
+                  </div>
+                );
+              })()}
 
               {vaccByDisease.length > 0 && (
                 <div className="overflow-hidden rounded-lg ring-1 ring-slate-200">
@@ -367,32 +384,35 @@ export default function CountyDetailPanel({
                           Disease
                         </th>
                         <th className="px-3 py-2 text-right text-slate-500 font-medium">
-                          Vacc %
+                          Exempt %
                         </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {vaccByDisease
                         .slice()
-                        .sort((a, b) => a.vaccinated_pct - b.vaccinated_pct)
-                        .map((r) => (
-                          <tr key={r.disease_id} className="hover:bg-slate-50">
-                            <td className="px-3 py-1.5 text-slate-700">
-                              {diseaseName(r.disease_id)}
-                            </td>
-                            <td
-                              className={`px-3 py-1.5 text-right font-medium ${
-                                r.vaccinated_pct < 85
-                                  ? "text-red-600"
-                                  : r.vaccinated_pct < 90
-                                  ? "text-amber-600"
-                                  : "text-green-700"
-                              }`}
-                            >
-                              {r.vaccinated_pct.toFixed(1)}%
-                            </td>
-                          </tr>
-                        ))}
+                        .sort((a, b) => b.vaccinated_pct - a.vaccinated_pct)
+                        .map((r) => {
+                          const ep = +(100 - r.vaccinated_pct).toFixed(2);
+                          return (
+                            <tr key={r.disease_id} className="hover:bg-slate-50">
+                              <td className="px-3 py-1.5 text-slate-700">
+                                {diseaseName(r.disease_id)}
+                              </td>
+                              <td
+                                className={`px-3 py-1.5 text-right font-medium ${
+                                  ep > 10
+                                    ? "text-red-600"
+                                    : ep > 5
+                                    ? "text-amber-600"
+                                    : "text-green-700"
+                                }`}
+                              >
+                                {ep.toFixed(1)}%
+                              </td>
+                            </tr>
+                          );
+                        })}
                     </tbody>
                   </table>
                 </div>

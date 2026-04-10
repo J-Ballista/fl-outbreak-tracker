@@ -54,10 +54,11 @@ export default function TrendSparkline({
       value: d.total_cases,
     }));
 
-    // Convert yearly vacc data to dates (Jul 1 of each year — mid-year)
+    // Convert yearly vacc data to exempt % dates (Jul 1 of each year — mid-year)
+    // Invert vaccinated_pct → exempt_pct so rising line = rising risk
     const parsedVacc = vaccTrend.map((d) => ({
       date: new Date(d.survey_year, 6, 1),
-      value: d.vaccinated_pct,
+      value: +(100 - d.vaccinated_pct).toFixed(2),
     }));
 
     // ── Shared X scale across both datasets ──────────────────────────────────
@@ -82,9 +83,11 @@ export default function TrendSparkline({
 
     // ── Right Y scale — vaccination % ────────────────────────────────────────
 
+    // Exempt threshold = 100 - herd threshold (e.g. herd=95% → safe if exempt < 5%)
+    const exemptThreshold = herdThreshold != null ? 100 - herdThreshold : null;
     const vaccValues = [
       ...parsedVacc.map((d) => d.value),
-      ...(herdThreshold != null ? [herdThreshold] : []),
+      ...(exemptThreshold != null ? [exemptThreshold] : []),
     ];
     const vaccCenter = vaccValues.length
       ? vaccValues.reduce((a, b) => a + b, 0) / vaccValues.length
@@ -146,8 +149,8 @@ export default function TrendSparkline({
         .attr("transform", "rotate(90)")
         .attr("x", h / 2).attr("y", -(w + 40))
         .attr("text-anchor", "middle")
-        .attr("fill", "#15803d").attr("font-size", 10).attr("font-weight", "600")
-        .text("Vacc %");
+        .attr("fill", "#c2410c").attr("font-size", 10).attr("font-weight", "600")
+        .text("Exempt %");
     }
 
     // ── Bottom X axis — always pin last case date ────────────────────────────
@@ -203,7 +206,7 @@ export default function TrendSparkline({
     // ── Vaccination trend line (dark green, right axis) ──────────────────────
 
     if (parsedVacc.length > 0) {
-      // Dots at each survey year
+      // Dots at each survey year (orange-red — rising exemption = rising risk)
       g.selectAll("circle.vacc-dot")
         .data(parsedVacc)
         .join("circle")
@@ -211,7 +214,7 @@ export default function TrendSparkline({
         .attr("cx", (d) => xScale(d.date))
         .attr("cy", (d) => yRight(d.value))
         .attr("r", 4)
-        .attr("fill", "#15803d")
+        .attr("fill", "#c2410c")
         .attr("stroke", "#fff")
         .attr("stroke-width", 1.5);
 
@@ -219,7 +222,7 @@ export default function TrendSparkline({
         g.append("path")
           .datum(parsedVacc)
           .attr("fill", "none")
-          .attr("stroke", "#15803d")
+          .attr("stroke", "#c2410c")
           .attr("stroke-width", 2.5)
           .attr(
             "d",
@@ -233,8 +236,8 @@ export default function TrendSparkline({
 
     // ── Herd threshold static dotted line (amber) ────────────────────────────
 
-    if (herdThreshold != null) {
-      const ty = yRight(herdThreshold);
+    if (exemptThreshold != null) {
+      const ty = yRight(exemptThreshold);
       g.append("line")
         .attr("x1", 0).attr("x2", w)
         .attr("y1", ty).attr("y2", ty)
@@ -242,12 +245,12 @@ export default function TrendSparkline({
         .attr("stroke-width", 2)
         .attr("stroke-dasharray", "6,4");
 
-      // Label on left
+      // Label on left — "safe zone" ceiling for exemptions
       g.append("text")
         .attr("x", 4).attr("y", ty - 5)
         .attr("fill", "#d97706")
         .attr("font-size", 12).attr("font-weight", "700")
-        .text(`Herd ${fmt(herdThreshold)}%`);
+        .text(`Safe <${fmt(exemptThreshold)}%`);
     }
 
     // ── Interactive hover ────────────────────────────────────────────────────
@@ -269,14 +272,14 @@ export default function TrendSparkline({
     hoverGroup.append("circle")
       .attr("class", "h-dot-vacc")
       .attr("r", 4.5)
-      .attr("fill", "#15803d").attr("stroke", "#fff").attr("stroke-width", 2)
+      .attr("fill", "#c2410c").attr("stroke", "#fff").attr("stroke-width", 2)
       .style("display", "none");
 
     const tipG = hoverGroup.append("g");
     const tipRect = tipG.append("rect").attr("rx", 4).attr("fill", "#1e293b").attr("opacity", 0.9);
     const tipDate  = tipG.append("text").attr("fill", "#94a3b8").attr("font-size", 10).attr("font-weight", "500");
     const tipCases = tipG.append("text").attr("fill", "#fca5a5").attr("font-size", 12).attr("font-weight", "700");
-    const tipVacc  = tipG.append("text").attr("fill", "#86efac").attr("font-size", 11).attr("font-weight", "600");
+    const tipVacc  = tipG.append("text").attr("fill", "#fdba74").attr("font-size", 11).attr("font-weight", "600");
 
     g.append("rect")
       .attr("width", w).attr("height", h)
@@ -313,7 +316,7 @@ export default function TrendSparkline({
           const vpy = yRight(vp.value);
           hoverGroup.select(".h-dot-vacc").style("display", null)
             .attr("cx", xScale(vp.date)).attr("cy", vpy);
-          vaccLine = `Vacc ${fmt(vp.value)}% (${vp.date.getFullYear()})`;
+          vaccLine = `Exempt ${fmt(vp.value)}% (${vp.date.getFullYear()})`;
         } else {
           hoverGroup.select(".h-dot-vacc").style("display", "none");
         }
@@ -352,8 +355,8 @@ export default function TrendSparkline({
         </span>
         {vaccTrend.length > 0 && (
           <span className="flex items-center gap-1.5">
-            <span className="inline-block w-5 bg-green-700" style={{ height: 2 }} />
-            Vacc rate YoY (right axis)
+            <span className="inline-block w-5 bg-orange-700" style={{ height: 2 }} />
+            Exempt rate YoY (right axis)
           </span>
         )}
         {herdThreshold != null && (
